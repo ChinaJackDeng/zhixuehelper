@@ -19,8 +19,7 @@
       <el-tooltip 
         :content="getFullFileName()" 
         placement="top" 
-        :show-after="500"
-        :disabled="hovering"
+        :show-after="300"
       >
         <h4 class="file-name" :class="{ 'is-expanded': hovering }">
           {{ getFullFileName() }}
@@ -156,7 +155,7 @@ export default {
   flex-direction: column;
   align-items: center;
   width: 150px;
-  min-height: 145px;
+  height: 180px;
   padding: 0;
   position: relative;
   overflow: visible;
@@ -178,16 +177,17 @@ export default {
 
 .file-type-icon {
   width: 140px;
-  height: 135px;
+  height: 110px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  margin-bottom: 8px;
 }
 
 .file-icon {
   width: 100%;
-  height: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 
@@ -204,22 +204,28 @@ export default {
 .file-name {
   margin: 0;
   color: #333;
-  font-size: 17px;
-  font-weight: normal;
-  line-height: 1.3;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 100%;
-  transition: all 0.3s ease;
-  word-break: break-all;
+  width: 130px;
+  transition: all 0.2s ease;
+  max-width: 130px;
+  text-align: center;
+  padding: 0 5px;
 }
 
 .file-name.is-expanded {
   white-space: normal;
   text-overflow: clip;
   overflow: visible;
-  max-height: none;
+  max-height: 50px;
+  word-break: break-word;
+  max-width: 150px;
+  line-height: 1.3;
+  font-size: 14px;
 }
 
 .file-meta {
@@ -275,12 +281,12 @@ export default {
 @media (max-width: 480px) {
   .knowledge-card {
     width: 120px;
-    min-height: 115px;
+    height: 150px;
   }
 
   .file-type-icon {
     width: 110px;
-    height: 105px;
+    height: 90px;
   }
 
   .file-name {

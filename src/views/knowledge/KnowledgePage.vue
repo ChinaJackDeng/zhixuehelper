@@ -54,7 +54,7 @@
         <el-button
             type="primary"
             plain
-            size="small"
+            size="medium"
             @click="showAddTagDialog = true"
         >
           + 新建标签
@@ -70,8 +70,9 @@
                 :type="getTagType(tag.id)"
                 :closable="tag.createdBy === currentUser"
                 :style="{
-                backgroundColor: tag.color,
-                color: getTextColor(tag.color)
+                backgroundColor: '#e6f2ff',
+                color: '#000000',
+                border: '1px solid #1890ff'
               }"
                 class="tag-item"
                 @click="toggleTagSelection(tag.id)"
@@ -100,8 +101,8 @@
 
     <!-- 主要内容区：左右分栏 -->
     <div class="main-content-area">
-      <!-- 左栏：知识文档列表 (70%) -->
-      <div class="knowledge-list-panel" :style="{ width: selectedDoc ? '70%' : '100%' }">
+      <!-- 左栏：知识文档列表 (60%) -->
+      <div class="knowledge-list-panel" :style="{ width: selectedDoc ? '60%' : '100%' }">
         <div class="panel-header">
           <h3>知识文档</h3>
           <div class="stats">
@@ -154,7 +155,7 @@
         </div>
       </div>
 
-      <!-- 右栏：文档详情面板 (30%) -->
+      <!-- 右栏：文档详情面板 (40%) -->
       <div class="detail-panel">
         <div v-if="!selectedDoc" class="empty-detail">
           <el-empty description="请选择一个文档查看详情">
@@ -167,8 +168,10 @@
         </div>
 
         <div v-else>
-          <div class="detail-header">
-            <div class="doc-title-section">
+          <!-- 文档头部信息区：标题、信息 -->
+          <div class="doc-header-section">
+            <!-- 文档标题 -->
+            <div class="doc-title-container">
               <h3 class="doc-title">{{ selectedDoc.title }}</h3>
               <div class="doc-meta">
                 <span class="create-time">
@@ -182,105 +185,105 @@
               </div>
             </div>
 
-            <div class="doc-actions">
-              <el-button
-                  type="primary"
-                  icon="MagicStick"
-                  @click="handleGenerateFromDoc"
-              >
-                从此文档生成题目
-              </el-button>
-              <el-button
-                  type="warning"
-                  icon="Edit"
-                  @click="editDocument(selectedDoc)"
-              >
-                编辑
-              </el-button>
+            <!-- 文档信息区 -->
+            <div class="doc-info-container">
+              <div class="doc-info-inline">
+                <div class="info-item">
+                  <span class="info-label">知识块数量：</span>
+                  <span class="info-value">{{ selectedDoc.chunkCount || 0 }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">文件大小：</span>
+                  <span class="info-value">{{ formatFileSize(selectedDoc.size) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">最后访问：</span>
+                  <span class="info-value">{{ formatRelativeTime(selectedDoc.lastAccessed) }}</span>
+                </div>
+              </div>
+
+              <div class="doc-actions-button">
+                <el-button
+                    type="primary"
+                    icon="MagicStick"
+                    size="default"
+                    @click="handleGenerateFromDoc"
+                >
+                  从此文档生成题目
+                </el-button>
+              </div>
             </div>
           </div>
 
-          <!-- 文档标签管理区 -->
+          <!-- 文档标签区：显示在中间空行 -->
           <div class="doc-tags-section">
-            <div class="section-title">
-              <span>文档标签</span>
-              <el-button
-                  type="text"
-                  icon="Plus"
-                  @click="showAddTagToDoc = true"
-              >
-                添加标签
-              </el-button>
-            </div>
-
-            <div class="doc-tags-list">
+            <div class="tags-line">
               <el-tag
                   v-for="tag in selectedDoc.tags"
                   :key="tag.id"
-                  :type="getTagType(tag.id)"
                   closable
+                  class="doc-tag-item"
                   :style="{
-                  backgroundColor: tag.color,
-                  color: getTextColor(tag.color)
+                  backgroundColor: tag.color + '20',
+                  color: tag.color,
+                  border: `1px solid ${tag.color}40`
                 }"
                   @close="removeTagFromDoc(tag.id)"
-                  @click="handleTagClick(tag.id)"
               >
                 {{ tag.name }}
               </el-tag>
-
-              <el-empty
-                  v-if="selectedDoc.tags.length === 0"
-                  description="暂无标签"
-                  :image-size="50"
-              />
-            </div>
-          </div>
-
-          <!-- 自动标签推荐区 -->
-          <div class="doc-auto-tags-section" v-if="autoKeywords.length > 0">
-            <div class="section-title">
-              <span>
-                <el-icon><Star /></el-icon>
-                智能推荐标签
-              </span>
+              
+              <!-- 新增标签按钮 -->
               <el-button
-                  type="text"
+                  type="primary"
+                  link
                   size="small"
-                  @click="acceptAutoTags"
+                  class="add-tag-btn"
+                  @click="showAddTagToDocDialog = true"
               >
-                全部采纳
+                + 添加标签
               </el-button>
             </div>
-            <div class="doc-tags-list">
-              <el-tag
-                  v-for="(keyword, index) in autoKeywords"
-                  :key="index"
-                  type="info"
-                  effect="plain"
-                  class="auto-tag"
-                  @click="addAutoTag(keyword)"
-              >
-                {{ keyword }}
-              </el-tag>
-            </div>
           </div>
 
-          <!-- 关键词展示区 -->
-          <div class="doc-keywords-section" v-if="selectedDoc.keywords && selectedDoc.keywords.length > 0">
-            <div class="section-title">
-              <span><el-icon><Key /></el-icon> 关键词</span>
+          <!-- 推荐标签和关键词区 -->
+          <div class="doc-metadata-section">
+            <!-- 自动推荐标签区 -->
+            <div class="info-section" v-if="autoKeywords.length > 0">
+              <div class="info-section-title">
+                <el-icon><Star /></el-icon>
+                <span>推荐标签</span>
+              </div>
+              <div class="tags-group">
+                <el-tag
+                    v-for="(keyword, index) in autoKeywords"
+                    :key="index"
+                    type="info"
+                    effect="plain"
+                    class="auto-tag"
+                >
+                  {{ keyword }}
+                </el-tag>
+              </div>
             </div>
-            <div class="keywords-list">
-              <el-tag
-                  v-for="(keyword, index) in selectedDoc.keywords"
-                  :key="index"
-                  size="small"
-                  type="info"
-                  effect="plain"
-              >
-                {{ keyword }}
-              </el-tag>
+
+            <!-- 关键词展示区 -->
+            <div class="info-section" v-if="selectedDoc.keywords && selectedDoc.keywords.length > 0">
+              <div class="info-section-title">
+                <el-icon><Key /></el-icon>
+                <span>关键词</span>
+              </div>
+              <div class="tags-group">
+                <el-tag
+                    v-for="(keyword, index) in selectedDoc.keywords"
+                    :key="index"
+                    size="small"
+                    type="info"
+                    effect="plain"
+                >
+                  {{ keyword }}
+                </el-tag>
+              </div>
             </div>
           </div>
 
@@ -308,58 +311,10 @@
 
             <div class="content-display">
               <el-scrollbar>
-                <!-- 文本内容显示 -->
-                <div v-if="selectedDoc.type === 'text'" class="text-content">
-                  <pre>{{ selectedDoc.content }}</pre>
-                </div>
-
-                <!-- PDF 预览 -->
-                <div v-else-if="selectedDoc.type === 'pdf'" class="pdf-preview">
-                  <iframe
-                      :src="selectedDoc.fileUrl"
-                      width="100%"
-                      height="600"
-                      frameborder="0"
-                  />
-                </div>
-
-                <!-- 图片预览 -->
-                <div v-else-if="selectedDoc.type === 'image'" class="image-preview">
-                  <el-image
-                      :src="selectedDoc.fileUrl"
-                      :preview-src-list="[selectedDoc.fileUrl]"
-                      fit="contain"
-                      style="max-height: 400px;"
-                  />
-                </div>
-
-                <!-- Word 文档预览 -->
-                <div v-else-if="selectedDoc.type === 'word'" class="word-preview">
-                  <p>Word 文档预览</p>
-                  <el-button @click="downloadFile(selectedDoc)">
-                    下载文档
-                  </el-button>
-                </div>
+                <!-- Markdown 内容显示 -->
+                <div class="markdown-content" v-html="renderedMarkdown"></div>
               </el-scrollbar>
             </div>
-          </div>
-
-          <!-- 文档统计信息 -->
-          <div class="doc-stats-section">
-            <el-descriptions :column="2" border size="small">
-              <el-descriptions-item label="知识块数量">
-                <el-tag type="info">{{ selectedDoc.chunkCount || 0 }}</el-tag>
-              </el-descriptions-item>
-              <el-descriptions-item label="文件大小">
-                {{ formatFileSize(selectedDoc.size) }}
-              </el-descriptions-item>
-              <el-descriptions-item label="创建者">
-                {{ selectedDoc.creator?.name || '您' }}
-              </el-descriptions-item>
-              <el-descriptions-item label="最后访问">
-                {{ formatRelativeTime(selectedDoc.lastAccessed) }}
-              </el-descriptions-item>
-            </el-descriptions>
           </div>
         </div>
       </div>
@@ -420,9 +375,6 @@
         <el-form-item label="标签名称">
           <el-input v-model="newTagForm.name" placeholder="输入标签名称" />
         </el-form-item>
-        <el-form-item label="标签颜色">
-          <el-color-picker v-model="newTagForm.color" />
-        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -458,14 +410,27 @@ import KnowledgeCard from '@/components/common/KnowledgeCard.vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  getDocuments,
-  createTextDoc,
-  uploadFile,
-  deleteDoc,
-  getDocDetail,
-  getKeywords
+  getDocumentList,
+  createTextDocument as createTextDocApi,
+  uploadDocument,
+  deleteDocument as deleteDocApi,
+  getDocumentDetail,
+  getDocumentKeywords
 } from '@/api/knowledge'
 import { useStore } from 'vuex'
+import { marked } from 'marked'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
+
+// 配置 marked 使用 highlight.js 进行代码高亮
+marked.setOptions({
+  highlight: (code, lang) => {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value
+    }
+    return code
+  }
+})
 
 const router = useRouter()
 const store = useStore()
@@ -481,7 +446,7 @@ const autoKeywords = ref([])
 
 const showPasteDialog = ref(false)
 const showAddTagDialog = ref(false)
-const showAddTagToDoc = ref(false)
+const showAddTagToDocDialog = ref(false)
 const showDeleteConfirm = ref(false)
 const docToDelete = ref(null)
 
@@ -497,8 +462,7 @@ const pasteRules = {
 }
 
 const newTagForm = ref({
-  name: '',
-  color: '#409EFF'
+  name: ''
 })
 
 const allTags = ref([
@@ -538,9 +502,14 @@ const isAllSelected = computed(() => {
   return selectedTags.value.length === allTags.value.length
 })
 
+const renderedMarkdown = computed(() => {
+  if (!selectedDoc.value?.content) return ''
+  return marked(selectedDoc.value.content)
+})
+
 const loadDocuments = async () => {
   try {
-    const response = await getDocuments({
+    const response = await getDocumentList({
       page: currentPage.value,
       page_size: pageSize.value
     })
@@ -578,11 +547,8 @@ const handleSearch = () => {
 }
 
 const handleFileUpload = async (options) => {
-  const formData = new FormData()
-  formData.append('file', options.file)
-
   try {
-    await uploadFile(formData)
+    await uploadDocument(options.file, options.file.name)
     ElMessage.success('文件上传成功')
     loadDocuments()
   } catch (error) {
@@ -591,20 +557,35 @@ const handleFileUpload = async (options) => {
 }
 
 const beforeFileUpload = (file) => {
+  // 允许的文件类型
   const allowedTypes = [
     'application/pdf',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'text/plain',
     'image/jpeg',
-    'image/png'
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/bmp'
   ]
 
-  const isAllowed = allowedTypes.includes(file.type)
-  if (!isAllowed) {
-    ElMessage.error('不支持的文件格式')
+  // 允许的文件扩展名（作为备选验证）
+  const allowedExtensions = ['.pdf', '.txt', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+
+  // 获取文件扩展名
+  const fileName = file.name.toLowerCase()
+  const fileExtension = fileName.substring(fileName.lastIndexOf('.'))
+
+  // 验证文件类型或扩展名
+  const isAllowedType = allowedTypes.includes(file.type)
+  const isAllowedExtension = allowedExtensions.includes(fileExtension)
+
+  if (!isAllowedType && !isAllowedExtension) {
+    ElMessage.error('不支持的文件格式，请上传 PDF、TXT、DOC、DOCX 或图片文件')
+    return false
   }
-  return isAllowed
+  return true
 }
 
 const createTextDocument = async () => {
@@ -613,7 +594,7 @@ const createTextDocument = async () => {
   await pasteFormRef.value.validate(async (valid) => {
     if (valid) {
       try {
-        await createTextDoc({
+        await createTextDocApi({
           title: pasteForm.value.title,
           content: pasteForm.value.content
         })
@@ -630,18 +611,19 @@ const createTextDocument = async () => {
 
 const selectDocument = async (doc) => {
   try {
-    const response = await getDocDetail(doc.id)
+    const response = await getDocumentDetail(doc.id)
     const detail = response.data || response
     selectedDoc.value = {
       ...doc,
       content: detail.content || '暂无内容',
       tags: detail.tags || [],
-      keywords: detail.keywords || []
+      keywords: detail.keywords || [],
+      fileUrl: detail.fileUrl || doc.fileUrl || ''
     }
 
     if (detail.id) {
       try {
-        const keywordsRes = await getKeywords(detail.id)
+        const keywordsRes = await getDocumentKeywords(detail.id)
         autoKeywords.value = keywordsRes.data?.keywords || keywordsRes.keywords || []
       } catch (error) {
         console.error('获取关键词失败:', error)
@@ -662,7 +644,7 @@ const deleteDocument = async () => {
   if (!docToDelete.value) return
 
   try {
-    await deleteDoc(docToDelete.value.id)
+    await deleteDocApi(docToDelete.value.id)
     ElMessage.success('删除成功')
     showDeleteConfirm.value = false
     docToDelete.value = null
@@ -705,14 +687,14 @@ const createTag = () => {
   const newTag = {
     id: Date.now(),
     name: newTagForm.value.name,
-    color: newTagForm.value.color,
+    color: '#1890ff',
     docCount: 0,
     createdBy: currentUser.value
   }
 
   allTags.value.push(newTag)
   showAddTagDialog.value = false
-  newTagForm.value = { name: '', color: '#409EFF' }
+  newTagForm.value = { name: '' }
   ElMessage.success('标签创建成功')
 }
 
@@ -729,45 +711,18 @@ const removeTagFromDoc = (tagId) => {
   }
 }
 
-const addAutoTag = (keyword) => {
-  if (selectedDoc.value) {
-    const newTag = {
-      id: Date.now(),
-      name: keyword,
-      color: '#909399',
-      createdBy: currentUser.value
-    }
-    selectedDoc.value.tags.push(newTag)
-    autoKeywords.value = autoKeywords.value.filter(k => k !== keyword)
-    ElMessage.success('标签已添加')
-  }
-}
 
-const acceptAutoTags = () => {
-  if (selectedDoc.value) {
-    autoKeywords.value.forEach(keyword => {
-      const newTag = {
-        id: Date.now() + Math.random(),
-        name: keyword,
-        color: '#909399',
-        createdBy: currentUser.value
-      }
-      selectedDoc.value.tags.push(newTag)
-    })
-    autoKeywords.value = []
-    ElMessage.success('已采纳所有推荐标签')
-  }
-}
 
-const editDocument = () => {
-  ElMessage.info('编辑功能开发中')
-}
+
 
 const handleGenerateFromDoc = () => {
   if (selectedDoc.value) {
     router.push({
       path: '/question-bank/generate',
-      query: { docId: selectedDoc.value.id }
+      query: {
+        docId: selectedDoc.value.id,
+        docTitle: selectedDoc.value.title
+      }
     })
   }
 }
@@ -785,16 +740,6 @@ const handleCurrentChange = (val) => {
 const getTagType = (tagId) => {
   const types = ['', 'success', 'warning', 'danger', 'info']
   return types[tagId % types.length]
-}
-
-const getTextColor = (bgColor) => {
-  if (!bgColor) return '#ffffff'
-  const color = bgColor.charAt(0) === '#' ? bgColor.substring(1, 7) : bgColor
-  const r = parseInt(color.substring(0, 2), 16)
-  const g = parseInt(color.substring(2, 4), 16)
-  const b = parseInt(color.substring(4, 6), 16)
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000
-  return brightness > 128 ? '#000000' : '#ffffff'
 }
 
 const formatDateTime = (dateString) => {
@@ -843,15 +788,6 @@ const exportAsTxt = (doc) => {
   a.download = `${doc.title}.txt`
   a.click()
   URL.revokeObjectURL(url)
-}
-
-const downloadFile = (doc) => {
-  if (doc.fileUrl) {
-    const a = document.createElement('a')
-    a.href = doc.fileUrl
-    a.download = doc.title
-    a.click()
-  }
 }
 
 onMounted(() => {
@@ -909,18 +845,20 @@ onMounted(() => {
 }
 
 .tag-cloud {
-  max-height: 120px;
+  max-height: 150px;
 }
 
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .tag-item {
   cursor: pointer;
   transition: all 0.3s;
+  font-size: 14px;
+  padding: 6px 12px;
 }
 
 .tag-item:hover {
@@ -929,7 +867,8 @@ onMounted(() => {
 }
 
 .badge {
-  margin-left: 4px;
+  margin-left: 6px;
+  font-size: 12px;
 }
 
 .all-tag {
@@ -976,8 +915,8 @@ onMounted(() => {
   flex: 1;
   padding: 20px;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 16px 36px;
   overflow-y: auto;
 }
 
@@ -997,6 +936,15 @@ onMounted(() => {
   overflow: hidden;
 }
 
+.detail-panel {
+  width: 40%;
+  background: white;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .empty-detail {
   flex: 1;
   display: flex;
@@ -1004,9 +952,17 @@ onMounted(() => {
   justify-content: center;
 }
 
+.detail-panel > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
 .detail-header {
   padding: 20px;
   border-bottom: 1px solid #e4e7ed;
+  flex-shrink: 0;
 }
 
 .doc-title-section {
@@ -1015,7 +971,7 @@ onMounted(() => {
 
 .doc-title {
   margin: 0 0 8px 0;
-  font-size: 20px;
+  font-size: 16px;
   color: #303133;
 }
 
@@ -1033,25 +989,169 @@ onMounted(() => {
   gap: 4px;
 }
 
-.doc-actions {
+.detail-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e4e7ed;
+  flex-shrink: 0;
+}
+
+.doc-title-section {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 文档头部信息区：标题、标签、信息上下结构 */
+.doc-header-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
-.doc-tags-section,
-.doc-auto-tags-section,
-.doc-keywords-section,
-.doc-content-section,
-.doc-stats-section {
+.doc-title-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.doc-info-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.doc-info-inline {
+  flex: 1;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.info-label {
+  color: #909399;
+  font-weight: 500;
+}
+
+.info-value {
+  color: #606266;
+  font-weight: 500;
+}
+
+.doc-actions-button {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* 文档标签区：显示在文档信息和内容之间 */
+.doc-tags-section {
+  padding: 8px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  background: #fafafa;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.tags-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.doc-tag-item {
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+  padding: 4px 8px;
+}
+
+.doc-tag-item:hover {
+  opacity: 0.8;
+  transform: scale(1.02);
+}
+
+.add-tag-btn {
+  font-size: 13px !important;
+}
+
+/* 文档元数据区：推荐标签和关键词 */
+.doc-metadata-section {
+  padding: 12px 20px;
+  border-bottom: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 文档信息卡片区 */
+.doc-info-card {
+  padding: 12px 20px;
+  border-bottom: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.info-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #606266;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-section-title :deep(.el-icon) {
+  font-size: 12px;
+  color: #909399;
+}
+
+.tags-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.doc-content-section {
   padding: 16px 20px;
   border-bottom: 1px solid #e4e7ed;
+  flex: 7;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .section-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   font-size: 14px;
   font-weight: 600;
   color: #303133;
@@ -1060,7 +1160,7 @@ onMounted(() => {
 .doc-tags-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .auto-tag {
@@ -1085,31 +1185,177 @@ onMounted(() => {
 }
 
 .content-display {
-  max-height: 400px;
+  flex: 1;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
-  background: #f5f7fa;
+  background: #fafafa;
+  overflow: auto;
 }
 
-.text-content {
-  padding: 16px;
+.markdown-content {
+  padding: 20px;
+  line-height: 1.8;
+  color: #333;
+  font-size: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-.text-content pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  font-family: inherit;
+/* 标题样式 */
+.markdown-content h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 24px 0 12px 0;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 8px;
+  color: #1a1a1a;
+}
+
+.markdown-content h2 {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 20px 0 10px 0;
+  color: #1a1a1a;
+}
+
+.markdown-content h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 16px 0 8px 0;
+  color: #2c2c2c;
+}
+
+.markdown-content h4 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 12px 0 6px 0;
+  color: #2c2c2c;
+}
+
+.markdown-content h5 {
   font-size: 14px;
-  line-height: 1.6;
-  color: #303133;
+  font-weight: 600;
+  margin: 10px 0 4px 0;
 }
 
-.pdf-preview,
-.image-preview,
-.word-preview {
+.markdown-content h6 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 8px 0 2px 0;
+  color: #666;
+}
+
+/* 段落样式 */
+.markdown-content p {
+  margin: 12px 0;
+  line-height: 1.8;
+  font-size: 16px;
+}
+
+/* 列表样式 */
+.markdown-content ul,
+.markdown-content ol {
+  margin: 12px 0;
+  padding-left: 32px;
+}
+
+.markdown-content li {
+  margin: 6px 0;
+  line-height: 1.8;
+  font-size: 16px;
+}
+
+/* 代码样式 */
+.markdown-content code {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  color: #d63384;
+}
+
+.markdown-content pre {
+  background: #2d2d2d;
+  color: #f8f8f2;
   padding: 16px;
-  text-align: center;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 12px 0;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+/* 引用样式 */
+.markdown-content blockquote {
+  border-left: 4px solid #165dff;
+  padding: 12px 0 12px 16px;
+  margin: 12px 0;
+  background: #f0f7ff;
+  color: #666;
+  font-style: italic;
+  font-size: 16px;
+}
+
+/* 表格样式 */
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+  border: 1px solid #ddd;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid #ddd;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 16px;
+}
+
+.markdown-content th {
+  background: #f5f5f5;
+  font-weight: 600;
+  color: #333;
+}
+
+.markdown-content tr:nth-child(even) {
+  background: #fafafa;
+}
+
+/* 链接样式 */
+.markdown-content a {
+  color: #165dff;
+  text-decoration: none;
+  border-bottom: 1px solid #d0d0d0;
+  transition: all 0.3s;
+  font-size: 16px;
+}
+
+.markdown-content a:hover {
+  color: #0d47a1;
+  border-bottom-color: #165dff;
+}
+
+/* 水平线 */
+.markdown-content hr {
+  border: none;
+  border-top: 2px solid #e0e0e0;
+  margin: 20px 0;
+}
+
+/* 图片样式 */
+.markdown-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 12px 0;
 }
 
 .paste-dialog :deep(.el-dialog__body) {

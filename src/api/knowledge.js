@@ -6,6 +6,10 @@ import service from '@/utils/request'
 /**
  * 获取文档列表
  * @param {Object} params - 查询参数
+ * @param {number} params.page - 页码（默认1）
+ * @param {number} params.page_size - 每页数量（默认20）
+ * @param {string} params.status - 状态筛选（可选：pending/processing/completed/failed）
+ * @param {string} params.file_type - 文件类型筛选（可选：text/pdf/doc/docx/image）
  */
 export function getDocumentList(params = {}) {
   return service({
@@ -32,7 +36,7 @@ export function getDocumentDetail(docId) {
 }
 
 /**
- * 上传文档
+ * 上传文件文档
  * @param {File} file - 文件对象
  * @param {string} title - 文档标题（可选）
  */
@@ -56,6 +60,9 @@ export function uploadDocument(file, title) {
 /**
  * 创建文本文档
  * @param {Object} data - 文档数据
+ * @param {string} data.title - 文档标题
+ * @param {string} data.content - 文档内容
+ * @param {string} data.tags - 标签ID，多个用逗号分隔（可选）
  */
 export function createTextDocument(data) {
   return service({
@@ -64,22 +71,32 @@ export function createTextDocument(data) {
     data: {
       title: data.title,
       content: data.content,
-      tags: data.tags // 字符串，多个标签 ID 用逗号分隔
+      tags: data.tags || ''
     }
   })
 }
 
 /**
- * 搜索文档
- * @param {string} query - 查询文本
- * @param {string} searchType - 搜索类型：keyword, vector, hybrid
- * @param {number} topK - 返回结果数量
+ * 更新文档
+ * @param {number} docId - 文档 ID
+ * @param {Object} data - 更新数据
+ * @param {string} data.title - 文档标题（可选）
+ * @param {string} data.content - 文档内容（可选）
+ * @param {string} data.status - 状态（可选：pending/processing/completed/failed）
  */
-export function searchDocuments(query, searchType = 'hybrid', topK = 10) {
+export function updateDocument(docId, data) {
+  const formData = new URLSearchParams()
+  if (data.title) formData.append('title', data.title)
+  if (data.content) formData.append('content', data.content)
+  if (data.status) formData.append('status', data.status)
+  
   return service({
-    url: '/knowledge/search',
-    method: 'get',
-    params: { query, search_type: searchType, top_k: topK }
+    url: `/knowledge/documents/${docId}`,
+    method: 'put',
+    data: formData.toString(),
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
   })
 }
 
@@ -95,24 +112,16 @@ export function deleteDocument(docId) {
 }
 
 /**
- * 更新文档信息
- * @param {number} docId - 文档 ID
- * @param {Object} data - 更新数据
+ * 搜索文档
+ * @param {string} query - 查询文本
+ * @param {string} searchType - 搜索类型：keyword, vector, hybrid
+ * @param {number} topK - 返回结果数量
  */
-export function updateDocument(docId, data) {
-  // 后端使用 form-data 格式
-  const formData = new URLSearchParams()
-  if (data.title) formData.append('title', data.title)
-  if (data.content) formData.append('content', data.content)
-  if (data.status) formData.append('status', data.status)
-  
+export function searchDocuments(query, searchType = 'hybrid', topK = 10) {
   return service({
-    url: `/knowledge/documents/${docId}`,
-    method: 'put',
-    data: formData.toString(),
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    }
+    url: '/knowledge/search',
+    method: 'get',
+    params: { query, search_type: searchType, top_k: topK }
   })
 }
 
