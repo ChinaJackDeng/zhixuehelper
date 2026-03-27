@@ -117,11 +117,32 @@ export function deleteDocument(docId) {
  * @param {string} searchType - 搜索类型：keyword, vector, hybrid
  * @param {number} topK - 返回结果数量
  */
-export function searchDocuments(query, searchType = 'hybrid', topK = 10) {
+export function searchDocuments(query, searchType = 'hybrid', topK = 10, options = {}) {
+  let url = '/knowledge/search'
+  let params = {
+    query: query,
+    n_results: topK
+  }
+
+  if (searchType === 'vector') {
+    url = '/knowledge/search/semantic'
+    if (options.fileType) params.file_type = options.fileType
+    if (options.scoreThreshold !== undefined) params.score_threshold = options.scoreThreshold
+  } else if (searchType === 'keyword') {
+    url = '/knowledge/search/keyword'
+    if (options.fileType) params.file_type = options.fileType
+  } else if (searchType === 'hybrid') {
+    url = '/knowledge/search/hybrid'
+    if (options.fileType) params.file_type = options.fileType
+    if (options.semanticWeight !== undefined) params.semantic_weight = options.semanticWeight
+    if (options.scoreThreshold !== undefined) params.score_threshold = options.scoreThreshold
+  }
+
+  console.log('搜索API调用:', { url, searchType, params })
   return service({
-    url: '/knowledge/search',
+    url: url,
     method: 'get',
-    params: { query, search_type: searchType, top_k: topK }
+    params
   })
 }
 

@@ -47,6 +47,16 @@
       </div>
     </div>
 
+    <!-- 搜索结果信息 -->
+    <div v-if="searchResults.total > 0" class="search-results-info">
+      <el-alert
+          :title="`通过${getSearchTypeName(searchResults.type)}检索，一共检索到 ${searchResults.total} 条结果`"
+          type="info"
+          :closable="false"
+          show-icon
+      />
+    </div>
+
     <!-- 标签筛选栏 -->
     <div class="tag-filter-section">
       <div class="section-header">
@@ -415,7 +425,8 @@ import {
   uploadDocument,
   deleteDocument as deleteDocApi,
   getDocumentDetail,
-  getDocumentKeywords
+  getDocumentKeywords,
+  searchDocuments
 } from '@/api/knowledge'
 import { useStore } from 'vuex'
 import { marked } from 'marked'
@@ -481,18 +492,13 @@ const filteredDocuments = computed(() => {
 
   let result = documents
 
-  if (searchKeyword.value) {
-    const keyword = searchKeyword.value.toLowerCase()
-    result = result.filter(doc =>
-      doc.title?.toLowerCase().includes(keyword) ||
-      doc.content?.toLowerCase().includes(keyword)
-    )
-  }
-
-  if (selectedTags.value.length > 0) {
-    result = result.filter(doc =>
-      doc.tags?.some(tag => selectedTags.value.includes(tag.id))
-    )
+  // 只有在非搜索状态下才进行前端过滤
+  if (!searchKeyword.value) {
+    if (selectedTags.value.length > 0) {
+      result = result.filter(doc =>
+        doc.tags?.some(tag => selectedTags.value.includes(tag.id))
+      )
+    }
   }
 
   return result
@@ -542,8 +548,85 @@ const loadDocuments = async () => {
   }
 }
 
-const handleSearch = () => {
-  loadDocuments()
+const searchResults = ref({
+  total: 0,
+  type: '',
+  keyword: ''
+})
+
+const isSearching = ref(false)
+
+const handleSearch = async () => {
+  if (!searchKeyword.value) {
+    searchResults.value = {
+      total: 0,
+      type: '',
+      keyword: ''
+    }
+    loadDocuments()
+    return
+  }
+
+  isSearching.value = true
+  try {
+    console.log('开始搜索:', searchKeyword.value, '类型:', searchType.value)
+    const response = await searchDocuments(searchKeyword.value, searchType.value, 100)
+    const responseData = response.data || response
+    
+    console.log('搜索响应数据:', responseData)
+    console.log('响应数据类型:', typeof responseData)
+    console.log('是否包含documents:', 'documents' in responseData)
+    
+    if (responseData.documents && Array.isArray(responseData.documents)) {
+      console.log('搜索结果数量:', responseData.documents.length)
+      console.log('搜索结果:', responseData.documents)
+      
+      const formattedDocs = responseData.documents.map(doc => ({
+        id: doc.id,
+        title: doc.title,
+        type: doc.file_type || 'text',
+        createTime: doc.created_at,
+        updateTime: doc.updated_at,
+        file_size: doc.file_size,
+        size: doc.file_size,
+        chunkCount: doc.chunk_count,
+        accessCount: doc.access_count,
+        lastAccessed: doc.last_accessed,
+        status: doc.status,
+        tags: [],
+        keywords: [],
+        content: ''
+      }))
+
+      console.log('格式化后的文档:', formattedDocs)
+      store.commit('knowledge/SET_DOCUMENTS', formattedDocs)
+      searchResults.value = {
+        total: formattedDocs.length,
+        type: searchType.value,
+        keyword: searchKeyword.value
+      }
+      console.log('搜索结果状态:', searchResults.value)
+    } else {
+      console.log('无搜索结果')
+      store.commit('knowledge/SET_DOCUMENTS', [])
+      searchResults.value = {
+        total: 0,
+        type: searchType.value,
+        keyword: searchKeyword.value
+      }
+    }
+  } catch (error) {
+    console.error('搜索失败:', error)
+    ElMessage.error('搜索失败: ' + error.message)
+    store.commit('knowledge/SET_DOCUMENTS', [])
+    searchResults.value = {
+      total: 0,
+      type: searchType.value,
+      keyword: searchKeyword.value
+    }
+  } finally {
+    isSearching.value = false
+  }
 }
 
 const handleFileUpload = async (options) => {
@@ -725,6 +808,15 @@ const handleGenerateFromDoc = () => {
       }
     })
   }
+}
+
+const getSearchTypeName = (type) => {
+  const typeMap = {
+    'hybrid': '混合',
+    'keyword': '关键词',
+    'vector': '语义'
+  }
+  return typeMap[type] || type
 }
 
 const handleSizeChange = (val) => {
@@ -909,6 +1001,16 @@ onMounted(() => {
 .stats {
   font-size: 14px;
   color: #909399;
+}
+
+/* 搜索结果信息 */
+.search-results-info {
+  padding: 0 20px 16px;
+}
+
+.search-results-info .el-alert {
+  margin: 0;
+  border-radius: 4px;
 }
 
 .documents-grid {
