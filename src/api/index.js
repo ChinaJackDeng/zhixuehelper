@@ -1,9 +1,9 @@
 // src/api/index.js
 
 // 🔹 导入各业务模块
-import knowledge from './knowledge'
-import practice from './practice'
-import analytics from './analytics'
+import * as knowledge from './knowledge'
+import * as practice from './practice'
+import * as analytics from './analytics'
 
 
 // 🔹 导出 api 对象（按模块组织）

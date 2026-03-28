@@ -1,7 +1,7 @@
 // src/api/knowledge.js
 // 知识库相关 API 调用
 
-import service from '@/utils/request'
+import service from '@/api/request'
 
 /**
  * 获取文档列表
@@ -12,15 +12,22 @@ import service from '@/utils/request'
  * @param {string} params.file_type - 文件类型筛选（可选：text/pdf/doc/docx/image）
  */
 export function getDocumentList(params = {}) {
+  const requestParams = {
+    page: params.page || 1,
+    page_size: params.page_size || 20
+  }
+  
+  if (params.status) {
+    requestParams.status = params.status
+  }
+  if (params.file_type) {
+    requestParams.file_type = params.file_type
+  }
+  
   return service({
     url: '/knowledge/documents',
     method: 'get',
-    params: {
-      page: params.page || 1,
-      page_size: params.page_size || 20,
-      status: params.status || null,
-      file_type: params.file_type || null
-    }
+    params: requestParams
   })
 }
 

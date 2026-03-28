@@ -3,6 +3,8 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 
+const ACCESS_TOKEN_KEY = 'access_token'
+
 // 🔹 兼容 Vue CLI (process.env) 和 Vite (import.meta.env)
 const getEnvVar = (key) => {
     if (import.meta?.env?.[key]) return import.meta.env[key]
@@ -14,6 +16,7 @@ const getEnvVar = (key) => {
 const service = axios.create({
     baseURL: getEnvVar('VUE_APP_API_BASE_URL') ||
         getEnvVar('VITE_API_BASE_URL') ||
+        getEnvVar('VUE_APP_BASE_API') ||
         'http://localhost:8000/api',
     timeout: parseInt(getEnvVar('VUE_APP_API_TIMEOUT')) || 10000,
     headers: {
@@ -22,11 +25,23 @@ const service = axios.create({
     }
 })
 
+const clearAuthStorage = () => {
+    try {
+        localStorage.removeItem(ACCESS_TOKEN_KEY)
+        // 兼容旧字段，避免不同模块口径不一导致“看似登录但实际无 token”
+        localStorage.removeItem('token')
+        localStorage.removeItem('isLoggedIn')
+        localStorage.removeItem('userInfo')
+    } catch (e) {
+        // 忽略 storage 异常
+    }
+}
+
 // 🔹 请求拦截器
 service.interceptors.request.use(
     config => {
         // 添加 token
-        const token = localStorage.getItem('access_token')
+        const token = localStorage.getItem(ACCESS_TOKEN_KEY)
         if (token) {
             config.headers.Authorization = `Bearer ${token}`
         }
@@ -65,7 +80,7 @@ service.interceptors.response.use(
 
             // 401: 未登录/令牌过期
             if (res.code === 401) {
-                localStorage.removeItem('access_token')
+                clearAuthStorage()
                 ElMessage.warning('登录已过期，请重新登录')
                 router.replace('/login')
                 return Promise.reject(new Error(errorMsg))
@@ -83,7 +98,7 @@ service.interceptors.response.use(
             }
 
             // 其他业务错误
-            console.error(`🔴 API Error [${res.code}]:`, errorMsg)
+            console.error(`API Error [${res.code}]:`, errorMsg)
             ElMessage.error(errorMsg)
             return Promise.reject(new Error(errorMsg))
         }
@@ -96,6 +111,15 @@ service.interceptors.response.use(
         // 网络/超时等错误
         let errorMsg = '网络错误'
 
+        if (error.response?.status === 401) {
+            clearAuthStorage()
+            if (router.currentRoute?.value?.path !== '/login') {
+                ElMessage.warning('登录已过期，请重新登录')
+                router.replace('/login')
+            }
+            return Promise.reject(error)
+        }
+
         if (error.message?.includes('timeout')) {
             errorMsg = '请求超时，请检查网络'
         } else if (error.message?.includes('Network Error')) {
@@ -106,7 +130,7 @@ service.interceptors.response.use(
             errorMsg = '服务器内部错误'
         }
 
-        console.error('🔴 Response Error:', error)
+        console.error('Response Error:', error)
         ElMessage.error(errorMsg)
 
         return Promise.reject(error)

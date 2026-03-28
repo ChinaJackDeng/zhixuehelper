@@ -6,6 +6,7 @@
       <!-- 搜索区域 -->
       <div class="search-section">
         <el-select v-model="searchType" placeholder="搜索类型" size="default" style="width: 240px;">
+          <el-option label="全部文件" value="all" />
           <el-option label="混合搜索" value="hybrid" />
           <el-option label="关键词搜索" value="keyword" />
           <el-option label="语义搜索" value="vector" />
@@ -48,9 +49,9 @@
     </div>
 
     <!-- 搜索结果信息 -->
-    <div v-if="searchResults.total > 0" class="search-results-info">
+    <div v-if="searchResults.keyword" class="search-results-info">
       <el-alert
-          :title="`通过${getSearchTypeName(searchResults.type)}检索，一共检索到 ${searchResults.total} 条结果`"
+          :title="`通过${getSearchTypeName(searchResults.type)}检索，检索到了 ${searchResults.total} 条数据`"
           type="info"
           :closable="false"
           show-icon
@@ -151,8 +152,8 @@
           </el-empty>
         </div>
 
-        <!-- 分页器 -->
-        <div class="pagination-container" v-if="totalDocsFromBackend > pageSize">
+        <!-- 分页器（仅默认文档列表使用；搜索结果不分页，避免覆盖搜索结果） -->
+        <div class="pagination-container" v-if="!searchResults.keyword && totalDocsFromBackend > pageSize">
           <el-pagination
               v-model:current-page="currentPage"
               v-model:page-size="pageSize"
@@ -446,10 +447,11 @@ marked.setOptions({
 const router = useRouter()
 const store = useStore()
 
-const searchType = ref('hybrid')
+const searchType = ref('all')
 const searchKeyword = ref('')
 const selectedTags = ref([])
 const selectedDoc = ref(null)
+const displayedDocuments = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalDocsFromBackend = ref(0)
@@ -485,7 +487,7 @@ const allTags = ref([
 const currentUser = ref('user')
 
 const filteredDocuments = computed(() => {
-  const documents = store.state.knowledge.documents || []
+  const documents = displayedDocuments.value || []
   if (!Array.isArray(documents)) {
     return []
   }
@@ -513,7 +515,70 @@ const renderedMarkdown = computed(() => {
   return marked(selectedDoc.value.content)
 })
 
+// 是否启用默认文档列表（/api/knowledge/documents）。
+// 如果你希望“只能通过检索看结果”，可改为 false。
+const ENABLE_DEFAULT_DOCUMENT_LIST = true
+
+/**
+ * 将后端返回的文档/检索结果条目，适配为 KnowledgeCard 需要的字段。
+ * 尽量保留原始数据到 raw 字段，便于后续详情页直接使用/排查问题。
+ */
+const normalizeDocumentForCard = (doc, extra = {}) => {
+  const id =
+    doc?.id ??
+    doc?.doc_id ??
+    doc?.document_id ??
+    doc?.metadata?.id ??
+    doc?.metadata?.doc_id
+
+  const title =
+    doc?.title ??
+    doc?.name ??
+    doc?.filename ??
+    doc?.metadata?.title ??
+    doc?.metadata?.name ??
+    (id !== undefined ? `Document ${id}` : 'Untitled')
+
+  const type = doc?.file_type ?? doc?.type ?? doc?.metadata?.file_type ?? 'text'
+  const createTime = doc?.created_at ?? doc?.createTime ?? doc?.createdTime ?? doc?.metadata?.created_at
+  const updateTime = doc?.updated_at ?? doc?.updateTime ?? doc?.updatedTime ?? doc?.metadata?.updated_at
+  const fileSize = doc?.file_size ?? doc?.size ?? doc?.metadata?.file_size ?? 0
+
+  return {
+    // KnowledgeCard 依赖字段
+    id,
+    title,
+    type,
+    createTime,
+    updateTime,
+    file_size: fileSize,
+    size: fileSize,
+    // 其余字段尽量透传/兼容旧逻辑
+    chunkCount: doc?.chunk_count ?? doc?.chunkCount ?? doc?.metadata?.chunk_count,
+    accessCount: doc?.access_count ?? doc?.accessCount ?? doc?.metadata?.access_count,
+    lastAccessed: doc?.last_accessed ?? doc?.lastAccessed ?? doc?.metadata?.last_accessed,
+    status: doc?.status ?? doc?.metadata?.status,
+    tags: doc?.tags ?? [],
+    keywords: doc?.keywords ?? [],
+    content: doc?.content ?? '',
+    // 附加信息（比如检索 score）
+    ...extra,
+    raw: doc
+  }
+}
+
+let loadDocumentsSeq = 0
 const loadDocuments = async () => {
+  // 搜索态下禁用默认列表，避免覆盖检索结果
+  if (searchResults.value.keyword) return
+  if (!ENABLE_DEFAULT_DOCUMENT_LIST) {
+    displayedDocuments.value = []
+    store.commit('knowledge/SET_DOCUMENTS', [])
+    totalDocsFromBackend.value = 0
+    return
+  }
+
+  const seq = ++loadDocumentsSeq
   try {
     const response = await getDocumentList({
       page: currentPage.value,
@@ -521,27 +586,19 @@ const loadDocuments = async () => {
     })
 
     const responseData = response.data || response
-    if (responseData.documents && Array.isArray(responseData.documents)) {
-      const formattedDocs = responseData.documents.map(doc => ({
-        id: doc.id,
-        title: doc.title,
-        type: doc.file_type || 'text',
-        createTime: doc.created_at,
-        updateTime: doc.updated_at,
-        file_size: doc.file_size,
-        size: doc.file_size,
-        chunkCount: doc.chunk_count,
-        accessCount: doc.access_count,
-        lastAccessed: doc.last_accessed,
-        status: doc.status,
-        tags: [],
-        keywords: [],
-        content: ''
-      }))
+    // 如果期间进入了搜索态或发起了更新的 loadDocuments，则丢弃本次结果，避免覆盖
+    if (seq !== loadDocumentsSeq || searchResults.value.keyword) return
 
-      store.commit('knowledge/SET_DOCUMENTS', formattedDocs)
+    const docs = Array.isArray(responseData?.documents) ? responseData.documents : []
+    if (docs.length > 0) {
+      const normalizedDocs = docs.map(d => normalizeDocumentForCard(d))
+      displayedDocuments.value = normalizedDocs
+      store.commit('knowledge/SET_DOCUMENTS', normalizedDocs)
       totalDocsFromBackend.value = responseData.total || 0
+      return
     }
+    displayedDocuments.value = []
+    store.commit('knowledge/SET_DOCUMENTS', [])
   } catch (error) {
     console.error('加载文档失败:', error)
     ElMessage.error('加载文档失败: ' + error.message)
@@ -555,9 +612,13 @@ const searchResults = ref({
 })
 
 const isSearching = ref(false)
+let searchRequestSeq = 0
 
 const handleSearch = async () => {
-  if (!searchKeyword.value) {
+  const keyword = (searchKeyword.value || '').trim()
+  
+  // 如果选择"全部文件"，则加载默认文档列表
+  if (searchType.value === 'all') {
     searchResults.value = {
       total: 0,
       type: '',
@@ -566,63 +627,82 @@ const handleSearch = async () => {
     loadDocuments()
     return
   }
+  
+  if (!keyword) {
+    searchResults.value = {
+      total: 0,
+      type: '',
+      keyword: ''
+    }
+    // 退出搜索态：才允许回到默认列表
+    loadDocuments()
+    return
+  }
 
   isSearching.value = true
   try {
-    console.log('开始搜索:', searchKeyword.value, '类型:', searchType.value)
-    const response = await searchDocuments(searchKeyword.value, searchType.value, 100)
+    const requestSeq = ++searchRequestSeq
+    // 进入搜索态：重置分页，避免分页组件调整页码触发默认列表加载
+    currentPage.value = 1
+
+    // 固定本次请求快照，避免用户切换检索方式导致“显示与结果不一致”
+    const currentSearchType = searchType.value
+    const topK = 5
+    const searchOptions = {}
+    if (currentSearchType === 'vector') {
+      // 与 APITest 的默认行为对齐：显式传 score_threshold
+      searchOptions.scoreThreshold = 0.0
+    } else if (currentSearchType === 'hybrid') {
+      // 与文档默认一致，显式传参避免后端默认逻辑差异
+      searchOptions.semanticWeight = 0.7
+      searchOptions.scoreThreshold = 0.0
+    }
+
+    console.log('开始搜索:', keyword, '类型:', currentSearchType)
+    const response = await searchDocuments(keyword, currentSearchType, topK, searchOptions)
     const responseData = response.data || response
+
+    // 只接受“最后一次”请求，避免旧请求晚到覆盖新请求结果
+    if (requestSeq !== searchRequestSeq) return
     
     console.log('搜索响应数据:', responseData)
     console.log('响应数据类型:', typeof responseData)
-    console.log('是否包含documents:', 'documents' in responseData)
-    
-    if (responseData.documents && Array.isArray(responseData.documents)) {
-      console.log('搜索结果数量:', responseData.documents.length)
-      console.log('搜索结果:', responseData.documents)
-      
-      const formattedDocs = responseData.documents.map(doc => ({
-        id: doc.id,
-        title: doc.title,
-        type: doc.file_type || 'text',
-        createTime: doc.created_at,
-        updateTime: doc.updated_at,
-        file_size: doc.file_size,
-        size: doc.file_size,
-        chunkCount: doc.chunk_count,
-        accessCount: doc.access_count,
-        lastAccessed: doc.last_accessed,
-        status: doc.status,
-        tags: [],
-        keywords: [],
-        content: ''
-      }))
 
-      console.log('格式化后的文档:', formattedDocs)
-      store.commit('knowledge/SET_DOCUMENTS', formattedDocs)
+    // 按后端约定：三种检索接口都返回 { total, documents: [...] }
+    const documents = Array.isArray(responseData?.documents) ? responseData.documents : []
+    const total = typeof responseData?.total === 'number' ? responseData.total : documents.length
+
+    if (documents.length > 0) {
+      const docsForCards = documents.map((doc) => normalizeDocumentForCard(doc))
+
+      // 搜索态下：列表即为搜索返回的 documents（与 /knowledge/documents 明确区分）
+      displayedDocuments.value = docsForCards
+      store.commit('knowledge/SET_DOCUMENTS', docsForCards)
       searchResults.value = {
-        total: formattedDocs.length,
-        type: searchType.value,
-        keyword: searchKeyword.value
+        total,
+        type: currentSearchType,
+        keyword
       }
       console.log('搜索结果状态:', searchResults.value)
     } else {
       console.log('无搜索结果')
+      displayedDocuments.value = []
       store.commit('knowledge/SET_DOCUMENTS', [])
       searchResults.value = {
         total: 0,
-        type: searchType.value,
-        keyword: searchKeyword.value
+        type: currentSearchType,
+        keyword
       }
     }
   } catch (error) {
     console.error('搜索失败:', error)
     ElMessage.error('搜索失败: ' + error.message)
+    displayedDocuments.value = []
     store.commit('knowledge/SET_DOCUMENTS', [])
     searchResults.value = {
       total: 0,
       type: searchType.value,
-      keyword: searchKeyword.value
+      keyword
     }
   } finally {
     isSearching.value = false
@@ -812,6 +892,7 @@ const handleGenerateFromDoc = () => {
 
 const getSearchTypeName = (type) => {
   const typeMap = {
+    'all': '全部文件',
     'hybrid': '混合',
     'keyword': '关键词',
     'vector': '语义'
@@ -821,11 +902,13 @@ const getSearchTypeName = (type) => {
 
 const handleSizeChange = (val) => {
   pageSize.value = val
+  if (searchResults.value.keyword) return
   loadDocuments()
 }
 
 const handleCurrentChange = (val) => {
   currentPage.value = val
+  if (searchResults.value.keyword) return
   loadDocuments()
 }
 
@@ -883,7 +966,13 @@ const exportAsTxt = (doc) => {
 }
 
 onMounted(() => {
-  loadDocuments()
+  if (ENABLE_DEFAULT_DOCUMENT_LIST) {
+    loadDocuments()
+  } else {
+    displayedDocuments.value = []
+    store.commit('knowledge/SET_DOCUMENTS', [])
+    totalDocsFromBackend.value = 0
+  }
 })
 </script>
 
@@ -911,6 +1000,7 @@ onMounted(() => {
   flex: 1;
   max-width: 800px;
 }
+
 
 .action-buttons {
   display: flex;
@@ -1017,26 +1107,20 @@ onMounted(() => {
   flex: 1;
   padding: 20px;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 16px 36px;
+  grid-template-columns: repeat(9, 1fr);
+  grid-auto-rows: min-content;
+  gap: 26px 12px;
   overflow-y: auto;
 }
 
 .pagination-container {
-  padding: 16px 20px;
+  padding: 30px 20px;
   border-top: 1px solid #e4e7ed;
   display: flex;
   justify-content: center;
 }
 
-.detail-panel {
-  width: 30%;
-  background: white;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+
 
 .detail-panel {
   width: 40%;

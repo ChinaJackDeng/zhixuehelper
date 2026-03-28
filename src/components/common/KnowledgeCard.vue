@@ -4,7 +4,7 @@
       class="knowledge-card"
       :class="{ 'is-selected': selected }"
       :shadow="hovering ? 'hover' : 'never'"
-      :body-style="{ padding: '3.5px' }"
+      :body-style="{ padding: '0px' }"
       @click="$emit('click')"
       @mouseenter="hovering = true"
       @mouseleave="hovering = false"
@@ -16,13 +16,9 @@
 
     <!-- 文件信息 -->
     <div class="file-info">
-      <el-tooltip 
-        :content="getFullFileName()" 
-        placement="top" 
-        :show-after="300"
-      >
-        <h4 class="file-name" :class="{ 'is-expanded': hovering }">
-          {{ getFullFileName() }}
+      <el-tooltip :content="getFullFileName()" placement="top" :show-after="300">
+        <h4 class="file-name">
+          {{ getTruncatedFileName() }}
         </h4>
       </el-tooltip>
       <div class="file-meta">
@@ -105,6 +101,14 @@ export default {
       return iconMap[type] || textIcon
     }
 
+    const getTruncatedFileName = () => {
+      const fileName = getFullFileName()
+      if (fileName.length <= 8) {
+        return fileName
+      }
+      return fileName.substring(0, 8) + '...'
+    }
+
     const getFileExtension = (type) => {
       const extMap = {
         'text': '.txt',
@@ -139,6 +143,7 @@ export default {
       getFileIcon,
       getFileExtension,
       getFullFileName,
+      getTruncatedFileName,
       formatFileSize,
       Select
     }
@@ -154,13 +159,15 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 150px;
-  height: 180px;
-  padding: 0;
+  width: 125px;
+  height: 160px;
+  min-height: 160px;
+  padding: 2px;
   position: relative;
-  overflow: visible;
+  overflow: hidden;
   background: transparent;
   box-shadow: none;
+  margin: 0;
 }
 
 .knowledge-card:hover {
@@ -176,13 +183,13 @@ export default {
 }
 
 .file-type-icon {
-  width: 140px;
-  height: 110px;
+  width: 105px;
+  height: 105px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 
 .file-icon {
@@ -196,9 +203,9 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 0px;
   text-align: center;
-  padding: 6px 0;
+  padding: 0px;
 }
 
 .file-name {
@@ -206,42 +213,32 @@ export default {
   color: #333;
   font-size: 14px;
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 130px;
+  width: 110px;
   transition: all 0.2s ease;
-  max-width: 130px;
+  max-width: 110px;
   text-align: center;
   padding: 0 5px;
-}
-
-.file-name.is-expanded {
-  white-space: normal;
-  text-overflow: clip;
-  overflow: visible;
-  max-height: 50px;
-  word-break: break-word;
-  max-width: 150px;
-  line-height: 1.3;
-  font-size: 14px;
 }
 
 .file-meta {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  font-size: 14.5px;
+  gap: 0px;
+  font-size: 12px;
   color: #666;
   width: 100%;
+  line-height: 1.1;
 }
 
 .meta-item {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0px;
   white-space: nowrap;
   width: 100%;
   justify-content: center;

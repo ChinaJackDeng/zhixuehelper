@@ -1,13 +1,15 @@
 import { api } from '@/api'
 import { ElMessage } from 'element-plus'
 
+const ACCESS_TOKEN_KEY = 'access_token'
+
 export default {
     namespaced: true,
 
     state: () => ({
         userInfo: null,
-        token: localStorage.getItem('token') || null,
-        isLoggedIn: !!localStorage.getItem('isLoggedIn'),
+        token: localStorage.getItem(ACCESS_TOKEN_KEY) || null,
+        isLoggedIn: !!localStorage.getItem(ACCESS_TOKEN_KEY),
         loading: false
     }),
 
@@ -26,15 +28,20 @@ export default {
         SET_TOKEN(state, token) {
             state.token = token
             if (token) {
-                localStorage.setItem('token', token)
+                localStorage.setItem(ACCESS_TOKEN_KEY, token)
             } else {
-                localStorage.removeItem('token')
+                localStorage.removeItem(ACCESS_TOKEN_KEY)
             }
         },
 
         SET_LOGIN_STATUS(state, isLoggedIn) {
             state.isLoggedIn = isLoggedIn
-            localStorage.setItem('isLoggedIn', isLoggedIn)
+            // login 状态以 token 为准；兼容旧字段但不再作为权威来源
+            if (isLoggedIn) {
+                localStorage.setItem('isLoggedIn', 'true')
+            } else {
+                localStorage.removeItem('isLoggedIn')
+            }
         },
 
         SET_LOADING(state, loading) {
@@ -45,6 +52,7 @@ export default {
             state.userInfo = null
             state.token = null
             state.isLoggedIn = false
+            localStorage.removeItem(ACCESS_TOKEN_KEY)
             localStorage.removeItem('token')
             localStorage.removeItem('isLoggedIn')
         }

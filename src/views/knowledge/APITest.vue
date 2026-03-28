@@ -58,34 +58,115 @@
     <el-card class="test-card">
       <template #header>
         <div class="card-header">
-          <span>4. 搜索文档</span>
-          <div>
-            <el-input 
-              v-model="searchQuery" 
-              placeholder="输入搜索关键词" 
-              size="small"
-              style="width: 200px; margin-right: 10px;"
-            />
-            <el-select v-model="searchType" size="small" style="width: 120px; margin-right: 10px;">
-              <el-option label="混合搜索" value="hybrid" />
-              <el-option label="关键词搜索" value="keyword" />
-              <el-option label="语义搜索" value="vector" />
-            </el-select>
-            <el-button type="primary" size="small" @click="testSearch">
-              测试
-            </el-button>
-          </div>
+          <span>4. 语义检索（/knowledge/search/semantic）</span>
         </div>
       </template>
+      <div class="search-form-row">
+        <el-input
+          v-model="semanticParams.query"
+          placeholder="query（必填）"
+          size="small"
+          style="width: 220px;"
+        />
+        <el-input-number v-model="semanticParams.n_results" :min="1" :max="100" size="small" />
+        <el-select v-model="semanticParams.file_type" size="small" style="width: 140px;">
+          <el-option label="全部类型" value="" />
+          <el-option label="text" value="text" />
+          <el-option label="pdf" value="pdf" />
+          <el-option label="doc" value="doc" />
+          <el-option label="docx" value="docx" />
+          <el-option label="image" value="image" />
+        </el-select>
+        <el-input-number
+          v-model="semanticParams.score_threshold"
+          :min="0"
+          :max="1"
+          :step="0.1"
+          size="small"
+        />
+        <el-button type="primary" size="small" @click="testSemanticSearch">测试</el-button>
+      </div>
       <div class="test-result">
-        <pre>{{ searchResult }}</pre>
+        <pre>{{ semanticSearchResult }}</pre>
       </div>
     </el-card>
 
     <el-card class="test-card">
       <template #header>
         <div class="card-header">
-          <span>5. 删除文档 (ID: {{ deleteDocId }})</span>
+          <span>5. 关键词检索（/knowledge/search/keyword）</span>
+        </div>
+      </template>
+      <div class="search-form-row">
+        <el-input
+          v-model="keywordParams.query"
+          placeholder="query（必填）"
+          size="small"
+          style="width: 220px;"
+        />
+        <el-input-number v-model="keywordParams.n_results" :min="1" :max="100" size="small" />
+        <el-select v-model="keywordParams.file_type" size="small" style="width: 140px;">
+          <el-option label="全部类型" value="" />
+          <el-option label="text" value="text" />
+          <el-option label="pdf" value="pdf" />
+          <el-option label="doc" value="doc" />
+          <el-option label="docx" value="docx" />
+          <el-option label="image" value="image" />
+        </el-select>
+        <el-button type="primary" size="small" @click="testKeywordSearch">测试</el-button>
+      </div>
+      <div class="test-result">
+        <pre>{{ keywordSearchResult }}</pre>
+      </div>
+    </el-card>
+
+    <el-card class="test-card">
+      <template #header>
+        <div class="card-header">
+          <span>6. 混合检索（/knowledge/search/hybrid）</span>
+        </div>
+      </template>
+      <div class="search-form-row">
+        <el-input
+          v-model="hybridParams.query"
+          placeholder="query（必填）"
+          size="small"
+          style="width: 220px;"
+        />
+        <el-input-number v-model="hybridParams.n_results" :min="1" :max="100" size="small" />
+        <el-select v-model="hybridParams.file_type" size="small" style="width: 140px;">
+          <el-option label="全部类型" value="" />
+          <el-option label="text" value="text" />
+          <el-option label="pdf" value="pdf" />
+          <el-option label="doc" value="doc" />
+          <el-option label="docx" value="docx" />
+          <el-option label="image" value="image" />
+        </el-select>
+        <el-input-number
+          v-model="hybridParams.semantic_weight"
+          :min="0"
+          :max="1"
+          :step="0.1"
+          size="small"
+        />
+        <el-input-number
+          v-model="hybridParams.score_threshold"
+          :min="0"
+          :max="1"
+          :step="0.1"
+          size="small"
+        />
+        <el-button type="primary" size="small" @click="testHybridSearch">测试</el-button>
+      </div>
+      <div class="test-result">
+        <pre>{{ hybridSearchResult }}</pre>
+      </div>
+    </el-card>
+
+    <el-card class="test-card">
+      <template #header>
+        <div class="card-header">
+          <span>7. 删除文档 (ID: {{ deleteDocId }})</span>
           <div>
             <el-input-number v-model="deleteDocId" :min="1" size="small" style="width: 120px; margin-right: 10px;" />
             <el-button type="danger" size="small" @click="testDeleteDocument">
@@ -116,14 +197,35 @@ import {
 const documentListResult = ref('点击测试按钮查看结果')
 const documentDetailResult = ref('')
 const uploadResult = ref('')
-const searchResult = ref('')
+const semanticSearchResult = ref('')
+const keywordSearchResult = ref('')
+const hybridSearchResult = ref('')
 const deleteResult = ref('')
 
 // 测试参数
 const testDocId = ref(1)
-const searchQuery = ref('')
-const searchType = ref('hybrid')
 const deleteDocId = ref(1)
+
+const semanticParams = ref({
+  query: '',
+  n_results: 5,
+  file_type: '',
+  score_threshold: 0.0
+})
+
+const keywordParams = ref({
+  query: '',
+  n_results: 5,
+  file_type: ''
+})
+
+const hybridParams = ref({
+  query: '',
+  n_results: 5,
+  file_type: '',
+  semantic_weight: 0.7,
+  score_threshold: 0.0
+})
 
 // 测试获取文档列表
 const testGetDocuments = async () => {
@@ -165,16 +267,78 @@ const testUploadDocument = async (options) => {
   }
 }
 
-// 测试搜索
-const testSearch = async () => {
+// 测试语义检索
+const testSemanticSearch = async () => {
+  if (!semanticParams.value.query) {
+    ElMessage.warning('请输入语义检索 query')
+    return
+  }
   try {
-    searchResult.value = '搜索中...'
-    const response = await searchDocuments(searchQuery.value, searchType.value, 10)
-    searchResult.value = JSON.stringify(response, null, 2)
-    ElMessage.success('搜索成功')
+    semanticSearchResult.value = '搜索中...'
+    const options = {}
+    if (semanticParams.value.file_type) options.fileType = semanticParams.value.file_type
+    options.scoreThreshold = semanticParams.value.score_threshold
+    const response = await searchDocuments(
+      semanticParams.value.query,
+      'vector',
+      semanticParams.value.n_results,
+      options
+    )
+    semanticSearchResult.value = JSON.stringify(response, null, 2)
+    ElMessage.success('语义检索成功')
   } catch (error) {
-    searchResult.value = `错误：${error.message}`
-    ElMessage.error(`搜索失败：${error.message}`)
+    semanticSearchResult.value = `错误：${error.message}`
+    ElMessage.error(`语义检索失败：${error.message}`)
+  }
+}
+
+// 测试关键词检索
+const testKeywordSearch = async () => {
+  if (!keywordParams.value.query) {
+    ElMessage.warning('请输入关键词检索 query')
+    return
+  }
+  try {
+    keywordSearchResult.value = '搜索中...'
+    const options = {}
+    if (keywordParams.value.file_type) options.fileType = keywordParams.value.file_type
+    const response = await searchDocuments(
+      keywordParams.value.query,
+      'keyword',
+      keywordParams.value.n_results,
+      options
+    )
+    keywordSearchResult.value = JSON.stringify(response, null, 2)
+    ElMessage.success('关键词检索成功')
+  } catch (error) {
+    keywordSearchResult.value = `错误：${error.message}`
+    ElMessage.error(`关键词检索失败：${error.message}`)
+  }
+}
+
+// 测试混合检索
+const testHybridSearch = async () => {
+  if (!hybridParams.value.query) {
+    ElMessage.warning('请输入混合检索 query')
+    return
+  }
+  try {
+    hybridSearchResult.value = '搜索中...'
+    const options = {}
+    if (hybridParams.value.file_type) options.fileType = hybridParams.value.file_type
+    options.semanticWeight = hybridParams.value.semantic_weight
+    options.scoreThreshold = hybridParams.value.score_threshold
+    const response = await searchDocuments(
+      hybridParams.value.query,
+      'hybrid',
+      hybridParams.value.n_results,
+      options
+    )
+    hybridSearchResult.value = JSON.stringify(response, null, 2)
+    ElMessage.success('混合检索成功')
+  } catch (error) {
+    hybridSearchResult.value = `错误：${error.message}`
+    ElMessage.error(`混合检索失败：${error.message}`)
   }
 }
 
@@ -228,5 +392,13 @@ const testDeleteDocument = async () => {
   font-size: 13px;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.search-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  align-items: center;
 }
 </style>
