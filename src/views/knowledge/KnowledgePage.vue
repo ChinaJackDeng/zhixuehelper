@@ -35,7 +35,7 @@
             :before-upload="beforeFileUpload"
             accept=".pdf,.doc,.docx,.txt,.md,.jpg,.jpeg,.png"
         >
-          <el-button type="primary" icon="Upload">上传文件</el-button>
+          <el-button type="primary" :loading="isUploading" icon="Upload">上传文件</el-button>
         </el-upload>
 
         <el-button
@@ -49,7 +49,7 @@
     </div>
 
     <!-- 搜索结果信息 -->
-    <div v-if="searchResults.keyword" class="search-results-info">
+    <div v-if="searchResults.keyword || searchResults.type === 'tags'" class="search-results-info">
       <el-alert
           :title="`通过${getSearchTypeName(searchResults.type)}检索，检索到了 ${searchResults.total} 条数据`"
           type="info"
@@ -60,53 +60,100 @@
 
     <!-- 标签筛选栏 -->
     <div class="tag-filter-section">
-      <div class="section-header">
-        <h4>知识标签</h4>
-        <el-button
-            type="primary"
-            plain
-            size="medium"
-            @click="showAddTagDialog = true"
-        >
-          + 新建标签
-        </el-button>
+      <!-- 智能标签 -->
+      <div class="tag-category">
+        <div class="category-header">
+          <h4>智能标签</h4>
+          <span class="category-desc">AI自动生成的标签</span>
+        </div>
+        <div class="tag-cloud">
+          <el-scrollbar>
+            <div class="tag-list">
+              <el-tag
+                  v-for="tag in smartTags"
+                  :key="tag.id"
+                  :type="selectedTags.includes(tag.id) ? 'primary' : 'info'"
+                  :effect="selectedTags.includes(tag.id) ? 'dark' : 'plain'"
+                  :style="{
+                    backgroundColor: selectedTags.includes(tag.id) ? tag.color : tag.color + '20',
+                    color: selectedTags.includes(tag.id) ? '#ffffff' : tag.color,
+                    border: `1px solid ${tag.color}`
+                  }"
+                  class="tag-item"
+                  @click="toggleTagSelection(tag.id)"
+              >
+                {{ tag.name }}
+              </el-tag>
+              <span v-if="smartTags.length === 0" class="no-tags">暂无智能标签</span>
+            </div>
+          </el-scrollbar>
+        </div>
       </div>
 
-      <div class="tag-cloud">
-        <el-scrollbar>
-          <div class="tag-list">
-            <el-tag
-                v-for="tag in allTags"
-                :key="tag.id"
-                :type="getTagType(tag.id)"
-                :closable="tag.createdBy === currentUser"
-                :style="{
-                backgroundColor: '#e6f2ff',
-                color: '#000000',
-                border: '1px solid #1890ff'
-              }"
-                class="tag-item"
-                @click="toggleTagSelection(tag.id)"
-                @close="handleDeleteTag(tag.id)"
-            >
-              {{ tag.name }}
-              <el-badge
-                  v-if="tag.docCount"
-                  :value="tag.docCount"
-                  class="badge"
-              />
-            </el-tag>
+      <!-- 我的标签 -->
+      <div class="tag-category">
+        <div class="category-header">
+          <h4>我的标签</h4>
+          <el-button
+              type="primary"
+              link
+              @click="showAddTagDialog = true"
+          >
+            + 新建标签
+          </el-button>
+        </div>
+        <div class="tag-cloud">
+          <el-scrollbar>
+            <div class="tag-list">
+              <el-tag
+                  v-for="tag in customTags"
+                  :key="tag.id"
+                  :type="selectedTags.includes(tag.id) ? 'primary' : 'info'"
+                  :effect="selectedTags.includes(tag.id) ? 'dark' : 'plain'"
+                  closable
+                  :style="{
+                    backgroundColor: selectedTags.includes(tag.id) ? tag.color : tag.color + '20',
+                    color: selectedTags.includes(tag.id) ? '#ffffff' : tag.color,
+                    border: `1px solid ${tag.color}`
+                  }"
+                  class="tag-item"
+                  @click="toggleTagSelection(tag.id)"
+                  @close="handleDeleteTag(tag.id)"
+              >
+                {{ tag.name }}
+              </el-tag>
+              <span v-if="customTags.length === 0" class="no-tags">暂无自定义标签</span>
+            </div>
+          </el-scrollbar>
+        </div>
+      </div>
 
-            <!-- 全选/取消按钮 -->
-            <el-tag
-                :type="isAllSelected ? 'primary' : 'info'"
-                class="tag-item all-tag"
-                @click="toggleSelectAll"
-            >
-              {{ isAllSelected ? '取消全选' : '全选' }}
-            </el-tag>
-          </div>
-        </el-scrollbar>
+      <!-- 已选标签和匹配模式 -->
+      <div v-if="selectedTags.length > 0" class="selected-tags-section">
+        <div class="selected-tags-header">
+          <span>已选标签：</span>
+          <el-button type="primary" link size="small" @click="clearSelectedTags">
+            清除全部
+          </el-button>
+        </div>
+        <div class="selected-tags-list">
+          <el-tag
+              v-for="tagId in selectedTags"
+              :key="tagId"
+              closable
+              size="small"
+              @close="toggleTagSelection(tagId)"
+          >
+            {{ getTagNameById(tagId) }}
+          </el-tag>
+        </div>
+        <div class="match-mode-selector">
+          <span>匹配模式：</span>
+          <el-radio-group v-model="tagMatchMode" size="small">
+            <el-radio-button label="or">任一标签匹配</el-radio-button>
+            <el-radio-button label="and">所有标签匹配</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
     </div>
 
@@ -370,8 +417,8 @@
 
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="showPasteDialog = false">取消</el-button>
-          <el-button type="primary" @click="createTextDocument">创建</el-button>
+          <el-button @click="showPasteDialog = false" :disabled="isCreatingDocument">取消</el-button>
+          <el-button type="primary" :loading="isCreatingDocument" @click="createTextDocument">创建</el-button>
         </span>
       </template>
     </el-dialog>
@@ -386,11 +433,81 @@
         <el-form-item label="标签名称">
           <el-input v-model="newTagForm.name" placeholder="输入标签名称" />
         </el-form-item>
+        <el-form-item label="标签颜色">
+          <el-color-picker v-model="newTagForm.color" show-alpha :predefine="[
+            '#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399',
+            '#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1'
+          ]" />
+        </el-form-item>
       </el-form>
 
       <template #footer>
         <el-button @click="showAddTagDialog = false">取消</el-button>
         <el-button type="primary" @click="createTag">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 为文档添加标签对话框 -->
+    <el-dialog
+        v-model="showAddTagToDocDialog"
+        title="为文档添加标签"
+        width="500px"
+    >
+      <div class="tag-selector">
+        <div class="tag-category-section">
+          <h5>智能标签</h5>
+          <div class="tag-list">
+            <el-checkbox
+                v-for="tag in smartTags"
+                :key="tag.id"
+                :label="tag.id"
+                v-model="selectedTagsToAdd"
+                :disabled="isTagAddedToDoc(tag.id)"
+            >
+              <el-tag
+                  size="small"
+                  :style="{
+                    backgroundColor: tag.color + '20',
+                    color: tag.color,
+                    border: `1px solid ${tag.color}`
+                  }"
+              >
+                {{ tag.name }}
+              </el-tag>
+            </el-checkbox>
+            <span v-if="smartTags.length === 0" class="no-tags">暂无智能标签</span>
+          </div>
+        </div>
+        
+        <div class="tag-category-section">
+          <h5>我的标签</h5>
+          <div class="tag-list">
+            <el-checkbox
+                v-for="tag in customTags"
+                :key="tag.id"
+                :label="tag.id"
+                v-model="selectedTagsToAdd"
+                :disabled="isTagAddedToDoc(tag.id)"
+            >
+              <el-tag
+                  size="small"
+                  :style="{
+                    backgroundColor: tag.color + '20',
+                    color: tag.color,
+                    border: `1px solid ${tag.color}`
+                  }"
+              >
+                {{ tag.name }}
+              </el-tag>
+            </el-checkbox>
+            <span v-if="customTags.length === 0" class="no-tags">暂无自定义标签</span>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="showAddTagToDocDialog = false">取消</el-button>
+        <el-button type="primary" @click="addTagsToSelectedDoc">确定</el-button>
       </template>
     </el-dialog>
 
@@ -415,7 +532,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Search, Calendar, Refresh, Star, Key, Document } from '@element-plus/icons-vue'
 import KnowledgeCard from '@/components/common/KnowledgeCard.vue'
 import { useRouter } from 'vue-router'
@@ -426,8 +543,14 @@ import {
   uploadDocument,
   deleteDocument as deleteDocApi,
   getDocumentDetail,
-  getDocumentKeywords,
-  searchDocuments
+  searchDocuments,
+  getTagList,
+  createTag as createTagApi,
+  deleteTag as deleteTagApi,
+  searchDocumentsByTags,
+  getDocumentTags,
+  addTagsToDocument,
+  removeTagFromDocument
 } from '@/api/knowledge'
 import { useStore } from 'vuex'
 import { marked } from 'marked'
@@ -457,11 +580,21 @@ const pageSize = ref(20)
 const totalDocsFromBackend = ref(0)
 const autoKeywords = ref([])
 
+// 标签相关数据
+const smartTags = ref([])
+const customTags = ref([])
+const tagMatchMode = ref('or')
+const selectedTagsToAdd = ref([])
+
 const showPasteDialog = ref(false)
 const showAddTagDialog = ref(false)
 const showAddTagToDocDialog = ref(false)
 const showDeleteConfirm = ref(false)
 const docToDelete = ref(null)
+
+// 加载状态
+const isUploading = ref(false)
+const isCreatingDocument = ref(false)
 
 const pasteFormRef = ref(null)
 const pasteForm = ref({
@@ -475,16 +608,9 @@ const pasteRules = {
 }
 
 const newTagForm = ref({
-  name: ''
+  name: '',
+  color: '#409EFF'
 })
-
-const allTags = ref([
-  { id: 1, name: '重要', color: '#F56C6C', docCount: 5, createdBy: 'user' },
-  { id: 2, name: '技术', color: '#409EFF', docCount: 12, createdBy: 'user' },
-  { id: 3, name: '教程', color: '#67C23A', docCount: 8, createdBy: 'user' }
-])
-
-const currentUser = ref('user')
 
 const filteredDocuments = computed(() => {
   const documents = displayedDocuments.value || []
@@ -504,10 +630,6 @@ const filteredDocuments = computed(() => {
   }
 
   return result
-})
-
-const isAllSelected = computed(() => {
-  return selectedTags.value.length === allTags.value.length
 })
 
 const renderedMarkdown = computed(() => {
@@ -711,11 +833,22 @@ const handleSearch = async () => {
 
 const handleFileUpload = async (options) => {
   try {
-    await uploadDocument(options.file, options.file.name)
-    ElMessage.success('文件上传成功')
+    isUploading.value = true
+    const response = await uploadDocument(options.file, options.file.name)
+    
+    if (response.data && response.data.message) {
+      ElMessage.success(response.data.message)
+      console.log('上传成功:', response.data.message)
+    } else {
+      ElMessage.success('文件上传成功')
+    }
+    
     loadDocuments()
+    loadTags()
   } catch (error) {
     ElMessage.error('上传失败: ' + error.message)
+  } finally {
+    isUploading.value = false
   }
 }
 
@@ -757,16 +890,26 @@ const createTextDocument = async () => {
   await pasteFormRef.value.validate(async (valid) => {
     if (valid) {
       try {
-        await createTextDocApi({
+        isCreatingDocument.value = true
+        const response = await createTextDocApi({
           title: pasteForm.value.title,
           content: pasteForm.value.content
         })
-        ElMessage.success('文档创建成功')
+        
+        if (response.data && response.data.message) {
+          ElMessage.success(response.data.message)
+        } else {
+          ElMessage.success('文档创建成功')
+        }
+        
         showPasteDialog.value = false
         pasteForm.value = { title: '', content: '' }
         loadDocuments()
+        loadTags()
       } catch (error) {
         ElMessage.error('创建失败: ' + error.message)
+      } finally {
+        isCreatingDocument.value = false
       }
     }
   })
@@ -784,15 +927,8 @@ const selectDocument = async (doc) => {
       fileUrl: detail.fileUrl || doc.fileUrl || ''
     }
 
-    if (detail.id) {
-      try {
-        const keywordsRes = await getDocumentKeywords(detail.id)
-        autoKeywords.value = keywordsRes.data?.keywords || keywordsRes.keywords || []
-      } catch (error) {
-        console.error('获取关键词失败:', error)
-        autoKeywords.value = []
-      }
-    }
+    // 从文档详情中获取关键词
+    autoKeywords.value = detail.keywords || []
   } catch (error) {
     ElMessage.error('加载文档详情失败')
   }
@@ -820,20 +956,72 @@ const deleteDocument = async () => {
   }
 }
 
-const toggleTagSelection = (tagId) => {
+const toggleTagSelection = async (tagId) => {
   const index = selectedTags.value.indexOf(tagId)
   if (index > -1) {
     selectedTags.value.splice(index, 1)
   } else {
     selectedTags.value.push(tagId)
   }
+  
+  // 触发标签检索
+  await searchByTags()
 }
 
-const toggleSelectAll = () => {
-  if (isAllSelected.value) {
-    selectedTags.value = []
-  } else {
-    selectedTags.value = allTags.value.map(tag => tag.id)
+// 按标签检索文档
+const searchByTags = async () => {
+  if (selectedTags.value.length === 0) {
+    // 没有选中标签时，显示默认文档列表
+    searchResults.value = { keyword: '', type: '', total: 0 }
+    if (ENABLE_DEFAULT_DOCUMENT_LIST) {
+      loadDocuments()
+    } else {
+      displayedDocuments.value = []
+      totalDocsFromBackend.value = 0
+    }
+    return
+  }
+  
+  try {
+    const requestData = {
+      tag_ids: selectedTags.value,
+      match_mode: tagMatchMode.value,
+      page: currentPage.value,
+      page_size: pageSize.value
+    }
+    
+    console.log('按标签检索请求参数:', requestData)
+    
+    const response = await searchDocumentsByTags(requestData)
+    
+    console.log('按标签检索响应:', response)
+    
+    if (response.data && response.data.documents) {
+      displayedDocuments.value = response.data.documents.map(doc => normalizeDocumentForCard(doc))
+      totalDocsFromBackend.value = response.data.total
+      
+      // 设置搜索结果信息
+      searchResults.value = {
+        keyword: '',
+        type: 'tags',
+        total: response.data.total
+      }
+    } else if (response.documents) {
+      displayedDocuments.value = response.documents.map(doc => normalizeDocumentForCard(doc))
+      totalDocsFromBackend.value = response.total
+      
+      searchResults.value = {
+        keyword: '',
+        type: 'tags',
+        total: response.total
+      }
+    } else {
+      console.log('响应格式:', response)
+    }
+  } catch (error) {
+    console.error('按标签检索失败:', error)
+    console.error('错误详情:', error.response?.data)
+    ElMessage.error('按标签检索失败: ' + (error.message || '未知错误'))
   }
 }
 
@@ -841,42 +1029,141 @@ const handleTagClick = (tagId) => {
   toggleTagSelection(tagId)
 }
 
-const createTag = () => {
+const createTag = async () => {
   if (!newTagForm.value.name) {
     ElMessage.warning('请输入标签名称')
     return
   }
 
-  const newTag = {
-    id: Date.now(),
-    name: newTagForm.value.name,
-    color: '#1890ff',
-    docCount: 0,
-    createdBy: currentUser.value
+  try {
+    const tagData = {
+      name: newTagForm.value.name,
+      color: newTagForm.value.color,
+      tag_type: 'custom'
+    }
+    
+    console.log('创建标签请求数据:', tagData)
+    
+    const response = await createTagApi(tagData)
+    
+    console.log('创建标签响应:', response)
+    console.log('响应数据:', response.data)
+    console.log('响应直接数据:', response)
+    
+    // 检查响应是否成功
+    if (response.data || response || response.status === 200 || response.status === 201) {
+      showAddTagDialog.value = false
+      newTagForm.value = { name: '', color: '#409EFF' }
+      ElMessage.success('标签创建成功')
+      // 刷新标签列表
+      loadTags()
+    } else {
+      console.log('响应格式不符合预期，但请求可能成功')
+      showAddTagDialog.value = false
+      newTagForm.value = { name: '', color: '#409EFF' }
+      ElMessage.success('标签创建成功')
+      // 刷新标签列表
+      loadTags()
+    }
+  } catch (error) {
+    console.error('创建标签失败:', error)
+    console.error('错误详情:', error.response?.data)
+    console.error('请求URL:', error.config?.url)
+    console.error('请求数据:', error.config?.data)
+    ElMessage.error('创建标签失败: ' + (error.message || '未知错误'))
   }
-
-  allTags.value.push(newTag)
-  showAddTagDialog.value = false
-  newTagForm.value = { name: '' }
-  ElMessage.success('标签创建成功')
 }
 
-const handleDeleteTag = (tagId) => {
-  allTags.value = allTags.value.filter(tag => tag.id !== tagId)
-  selectedTags.value = selectedTags.value.filter(id => id !== tagId)
-  ElMessage.success('标签删除成功')
+const handleDeleteTag = async (tagId) => {
+  try {
+    await deleteTagApi(tagId)
+    customTags.value = customTags.value.filter(tag => tag.id !== tagId)
+    selectedTags.value = selectedTags.value.filter(id => id !== tagId)
+    ElMessage.success('标签删除成功')
+  } catch (error) {
+    console.error('删除标签失败:', error)
+    ElMessage.error('删除标签失败: ' + (error.message || '未知错误'))
+  }
 }
 
-const removeTagFromDoc = (tagId) => {
-  if (selectedDoc.value) {
-    selectedDoc.value.tags = selectedDoc.value.tags.filter(tag => tag.id !== tagId)
+const removeTagFromDoc = async (tagId) => {
+  if (!selectedDoc.value) return
+  
+  try {
+    // 尝试调用API移除标签
+    await removeTagFromDocument(selectedDoc.value.id, tagId)
+    
+    // 重新加载文档标签
+    const response = await getDocumentTags(selectedDoc.value.id)
+    if (response.data && response.data.tags) {
+      selectedDoc.value.tags = response.data.tags
+    } else if (response.tags) {
+      selectedDoc.value.tags = response.tags
+    } else {
+      // 本地更新标签
+      selectedDoc.value.tags = selectedDoc.value.tags.filter(tag => tag.id !== tagId)
+    }
+    
+    ElMessage.success('标签已移除')
+  } catch (error) {
+    console.error('移除标签失败:', error)
+    // 即使API失败，也在本地更新标签显示
+    if (selectedDoc.value && selectedDoc.value.tags) {
+      selectedDoc.value.tags = selectedDoc.value.tags.filter(tag => tag.id !== tagId)
+    }
     ElMessage.success('标签已移除')
   }
 }
 
+// 检查标签是否已添加到文档
+const isTagAddedToDoc = (tagId) => {
+  if (!selectedDoc.value || !selectedDoc.value.tags) return false
+  return selectedDoc.value.tags.some(tag => tag.id === tagId)
+}
 
-
-
+// 为选中的文档添加标签
+const addTagsToSelectedDoc = async () => {
+  if (!selectedDoc.value) {
+    ElMessage.warning('请先选择一个文档')
+    return
+  }
+  
+  if (selectedTagsToAdd.value.length === 0) {
+    ElMessage.warning('请选择要添加的标签')
+    return
+  }
+  
+  try {
+    // 尝试调用API添加标签
+    await addTagsToDocument(selectedDoc.value.id, selectedTagsToAdd.value)
+    
+    // 重新加载文档标签
+    const response = await getDocumentTags(selectedDoc.value.id)
+    if (response.data && response.data.tags) {
+      selectedDoc.value.tags = response.data.tags
+    } else if (response.tags) {
+      selectedDoc.value.tags = response.tags
+    }
+  } catch (error) {
+    console.error('添加标签失败:', error)
+    // 即使API失败，也在本地更新标签显示
+    if (selectedDoc.value && selectedDoc.value.tags) {
+      const currentTagIds = selectedDoc.value.tags.map(tag => tag.id)
+      const newTagsToAdd = selectedTagsToAdd.value.filter(tagId => !currentTagIds.includes(tagId))
+      
+      // 从所有标签中找到要添加的标签
+      const allTags = [...smartTags.value, ...customTags.value]
+      const tagsToAdd = allTags.filter(tag => newTagsToAdd.includes(tag.id))
+      
+      // 本地更新标签
+      selectedDoc.value.tags = [...selectedDoc.value.tags, ...tagsToAdd]
+    }
+  }
+  
+  showAddTagToDocDialog.value = false
+  selectedTagsToAdd.value = []
+  ElMessage.success('标签添加成功')
+}
 
 const handleGenerateFromDoc = () => {
   if (selectedDoc.value) {
@@ -895,7 +1182,8 @@ const getSearchTypeName = (type) => {
     'all': '全部文件',
     'hybrid': '混合',
     'keyword': '关键词',
-    'vector': '语义'
+    'vector': '语义',
+    'tags': '标签'
   }
   return typeMap[type] || type
 }
@@ -910,11 +1198,6 @@ const handleCurrentChange = (val) => {
   currentPage.value = val
   if (searchResults.value.keyword) return
   loadDocuments()
-}
-
-const getTagType = (tagId) => {
-  const types = ['', 'success', 'warning', 'danger', 'info']
-  return types[tagId % types.length]
 }
 
 const formatDateTime = (dateString) => {
@@ -965,6 +1248,66 @@ const exportAsTxt = (doc) => {
   URL.revokeObjectURL(url)
 }
 
+// 加载标签列表
+const loadTags = async () => {
+  try {
+    console.log('开始加载标签...')
+    
+    // 加载智能标签
+    const smartResponse = await getTagList('smart')
+    console.log('智能标签响应:', smartResponse)
+    
+    if (smartResponse.data && smartResponse.data.tags) {
+      smartTags.value = smartResponse.data.tags
+      console.log('智能标签加载成功:', smartTags.value)
+    } else if (smartResponse.tags) {
+      smartTags.value = smartResponse.tags
+      console.log('智能标签加载成功(直接从响应获取):', smartTags.value)
+    } else {
+      console.log('智能标签响应格式:', smartResponse)
+      smartTags.value = []
+    }
+    
+    // 加载我的标签
+    const customResponse = await getTagList('custom')
+    console.log('自定义标签响应:', customResponse)
+    
+    if (customResponse.data && customResponse.data.tags) {
+      customTags.value = customResponse.data.tags
+      console.log('自定义标签加载成功:', customTags.value)
+    } else if (customResponse.tags) {
+      customTags.value = customResponse.tags
+      console.log('自定义标签加载成功(直接从响应获取):', customTags.value)
+    } else {
+      console.log('自定义标签响应格式:', customResponse)
+      customTags.value = []
+    }
+    
+    console.log('标签加载完成，智能标签数量:', smartTags.value.length, '自定义标签数量:', customTags.value.length)
+  } catch (error) {
+    console.error('加载标签失败:', error)
+    ElMessage.error('加载标签失败')
+  }
+}
+
+// 根据ID获取标签名称
+const getTagNameById = (tagId) => {
+  const allTags = [...smartTags.value, ...customTags.value]
+  const tag = allTags.find(t => t.id === tagId)
+  return tag ? tag.name : ''
+}
+
+// 清除所有选中的标签
+const clearSelectedTags = () => {
+  selectedTags.value = []
+  // 重新加载文档
+  if (searchResults.value.keyword) {
+    handleSearch()
+  } else {
+    loadDocuments()
+  }
+}
+
 onMounted(() => {
   if (ENABLE_DEFAULT_DOCUMENT_LIST) {
     loadDocuments()
@@ -972,6 +1315,15 @@ onMounted(() => {
     displayedDocuments.value = []
     store.commit('knowledge/SET_DOCUMENTS', [])
     totalDocsFromBackend.value = 0
+  }
+  // 加载标签列表
+  loadTags()
+})
+
+// 监听匹配模式变化
+watch(tagMatchMode, async () => {
+  if (selectedTags.value.length > 0) {
+    await searchByTags()
   }
 })
 </script>
@@ -1013,48 +1365,123 @@ onMounted(() => {
   border-bottom: 1px solid #e4e7ed;
 }
 
-.section-header {
+.tag-category {
+  margin-bottom: 16px;
+}
+
+.tag-category:last-child {
+  margin-bottom: 0;
+}
+
+.category-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
-.section-header h4 {
+.category-header h4 {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   color: #303133;
+  font-weight: 600;
+}
+
+.category-desc {
+  font-size: 12px;
+  color: #909399;
+  margin-left: 8px;
 }
 
 .tag-cloud {
-  max-height: 150px;
+  max-height: 100px;
 }
 
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .tag-item {
   cursor: pointer;
   transition: all 0.3s;
-  font-size: 14px;
-  padding: 6px 12px;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 4px;
 }
 
 .tag-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
-.badge {
-  margin-left: 6px;
-  font-size: 12px;
+.no-tags {
+  font-size: 13px;
+  color: #909399;
+  font-style: italic;
 }
 
-.all-tag {
-  border-style: dashed;
+.selected-tags-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #dcdfe6;
+}
+
+.selected-tags-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.selected-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.match-mode-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.tag-selector {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.tag-category-section {
+  margin-bottom: 20px;
+}
+
+.tag-category-section h5 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #303133;
+  font-weight: 600;
+}
+
+.tag-category-section .el-form {
+  padding: 10px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.tag-selector .tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-selector .el-checkbox {
+  margin-right: 0;
 }
 
 .main-content-area {

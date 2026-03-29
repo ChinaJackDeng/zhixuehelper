@@ -69,17 +69,12 @@ export function uploadDocument(file, title) {
  * @param {Object} data - 文档数据
  * @param {string} data.title - 文档标题
  * @param {string} data.content - 文档内容
- * @param {string} data.tags - 标签ID，多个用逗号分隔（可选）
  */
 export function createTextDocument(data) {
   return service({
     url: '/knowledge/documents/text',
     method: 'post',
-    data: {
-      title: data.title,
-      content: data.content,
-      tags: data.tags || ''
-    }
+    data
   })
 }
 
@@ -87,15 +82,11 @@ export function createTextDocument(data) {
  * 更新文档
  * @param {number} docId - 文档 ID
  * @param {Object} data - 更新数据
- * @param {string} data.title - 文档标题（可选）
- * @param {string} data.content - 文档内容（可选）
- * @param {string} data.status - 状态（可选：pending/processing/completed/failed）
  */
 export function updateDocument(docId, data) {
   const formData = new URLSearchParams()
   if (data.title) formData.append('title', data.title)
   if (data.content) formData.append('content', data.content)
-  if (data.status) formData.append('status', data.status)
   
   return service({
     url: `/knowledge/documents/${docId}`,
@@ -155,21 +146,30 @@ export function searchDocuments(query, searchType = 'hybrid', topK = 10, options
 
 /**
  * 获取标签列表
+ * @param {string} tagType - 标签类型：smart(智能标签), custom(我的标签)
  */
-export function getTagList() {
+export function getTagList(tagType = null) {
+  const params = {}
+  if (tagType) {
+    params.tag_type = tagType
+  }
   return service({
-    url: '/knowledge/tags',
-    method: 'get'
+    url: '/tags',
+    method: 'get',
+    params
   })
 }
 
 /**
  * 创建标签
  * @param {Object} data - 标签数据
+ * @param {string} data.name - 标签名称
+ * @param {string} data.color - 标签颜色
+ * @param {string} data.tag_type - 标签类型：smart(智能标签), custom(我的标签)
  */
 export function createTag(data) {
   return service({
-    url: '/knowledge/tags',
+    url: '/tags',
     method: 'post',
     data
   })
@@ -181,8 +181,19 @@ export function createTag(data) {
  */
 export function deleteTag(tagId) {
   return service({
-    url: `/knowledge/tags/${tagId}`,
+    url: `/tags/${tagId}`,
     method: 'delete'
+  })
+}
+
+/**
+ * 获取文档的标签
+ * @param {number} docId - 文档 ID
+ */
+export function getDocumentTags(docId) {
+  return service({
+    url: `/knowledge/documents/${docId}/tags`,
+    method: 'get'
   })
 }
 
@@ -206,8 +217,37 @@ export function addTagsToDocument(docId, tagIds) {
  */
 export function removeTagFromDocument(docId, tagId) {
   return service({
-    url: `/knowledge/documents/${docId}/tags/${tagId}`,
-    method: 'delete'
+    url: `/knowledge/documents/${docId}/tags`,
+    method: 'delete',
+    data: { tag_ids: [tagId] }
+  })
+}
+
+/**
+ * 按标签检索文档
+ * @param {Object} params - 查询参数
+ * @param {Array} params.tag_ids - 标签 ID 列表
+ * @param {string} params.match_mode - 匹配模式：or(任一标签匹配), and(所有标签匹配)
+ * @param {number} params.page - 页码
+ * @param {number} params.page_size - 每页数量
+ */
+export function searchDocumentsByTags(params = {}) {
+  const requestParams = {
+    page: params.page || 1,
+    page_size: params.page_size || 20,
+    match_mode: params.match_mode || 'or'
+  }
+  
+  if (params.tag_ids && params.tag_ids.length > 0) {
+    requestParams.tag_ids = params.tag_ids
+  }
+  
+  console.log('API请求参数:', requestParams)
+  
+  return service({
+    url: '/knowledge/documents/search-by-tags',
+    method: 'post',
+    data: requestParams
   })
 }
 
@@ -218,17 +258,6 @@ export function removeTagFromDocument(docId, tagId) {
 export function getDocumentChunks(docId) {
   return service({
     url: `/knowledge/documents/${docId}/chunks`,
-    method: 'get'
-  })
-}
-
-/**
- * 获取文档关键词
- * @param {number} docId - 文档 ID
- */
-export function getDocumentKeywords(docId) {
-  return service({
-    url: `/knowledge/documents/${docId}/keywords`,
     method: 'get'
   })
 }

@@ -128,6 +128,15 @@ service.interceptors.response.use(
             errorMsg = '接口不存在'
         } else if (error.response?.status === 500) {
             errorMsg = '服务器内部错误'
+        } else if (error.response?.status === 422) {
+            // 422: 验证错误，但可能包含有效数据
+            const responseData = error.response?.data
+            if (responseData) {
+                console.log('422响应数据:', responseData)
+                // 如果响应中有数据，返回数据而不是抛出错误
+                return responseData
+            }
+            errorMsg = '请求参数验证失败'
         }
 
         console.error('Response Error:', error)
