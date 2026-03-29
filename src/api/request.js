@@ -18,7 +18,7 @@ const service = axios.create({
         getEnvVar('VITE_API_BASE_URL') ||
         getEnvVar('VUE_APP_BASE_API') ||
         'http://localhost:8000/api',
-    timeout: parseInt(getEnvVar('VUE_APP_API_TIMEOUT')) || 10000,
+    timeout: parseInt(getEnvVar('VUE_APP_API_TIMEOUT')) || 60000, // 增加到 60 秒，适应 AI 处理时间
     headers: {
         'Content-Type': 'application/json',
         'X-Requested-With': 'XMLHttpRequest'

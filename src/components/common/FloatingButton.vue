@@ -32,6 +32,9 @@
             class="file-select" 
             filterable
             clearable
+            :loading="loadingFiles"
+            :teleported="false"
+            :popper-class="'file-select-dropdown'"
           >
             <el-option 
               v-for="file in allFiles" 
@@ -51,7 +54,7 @@
             <span>加入到对话</span>
           </el-button>
           <el-button 
-            type="text" 
+            link
             @click="handleClose"
             class="close-btn"
           >
@@ -72,7 +75,8 @@
           <div v-for="(message, index) in messages" :key="index" class="message" :class="message.type">
             <div class="message-content">
               <el-icon v-if="message.type === 'system-message'" class="file-icon"><Document /></el-icon>
-              {{ message.content }}
+              <div v-if="message.type === 'ai-message'" class="markdown-content" v-html="renderMarkdown(message.content)"></div>
+              <div v-else>{{ message.content }}</div>
             </div>
           </div>
         </div>
@@ -84,10 +88,14 @@
             :autosize="{ minRows: 1, maxRows: 4 }"
             placeholder="输入你的问题..."
             class="input-field"
+            :disabled="loading"
+            @keydown.enter.prevent="sendMessage"
           />
           <el-button 
             type="primary" 
             @click="sendMessage"
+            :loading="loading"
+            :disabled="!inputMessage.trim()"
             class="send-btn"
           >
             <span>发送</span>
@@ -101,6 +109,12 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ChatDotRound, Close, Document } from '@element-plus/icons-vue'
+import { getDocumentList } from '@/api/knowledge'
+import { sendChatMessage, createConversation, getChatHistory } from '@/api/chat'
+import MarkdownIt from 'markdown-it'
+
+// 初始化 Markdown 渲染器
+const md = new MarkdownIt()
 
 const props = defineProps({
   onClick: {
@@ -118,67 +132,53 @@ const currentPosition = ref({ x: 0, y: 0 })
 const showChatWindow = ref(false)
 const messages = ref([])
 const inputMessage = ref('')
+const loading = ref(false) // 消息发送加载状态
+const conversationId = ref(localStorage.getItem('currentConversationId') || null) // 当前会话 ID，从 localStorage 读取
 
 // 文件相关
-const knowledgeBases = ref([
-  {
-    id: '1', 
-    name: '数学知识库',
-    files: [
-      { id: '1-1', name: '高等数学上册' },
-      { id: '1-2', name: '高等数学下册' },
-      { id: '1-3', name: '线性代数' },
-      { id: '1-4', name: '概率论与数理统计' }
-    ]
-  },
-  {
-    id: '2', 
-    name: '物理知识库',
-    files: [
-      { id: '2-1', name: '力学' },
-      { id: '2-2', name: '热学' },
-      { id: '2-3', name: '电磁学' },
-      { id: '2-4', name: '光学' }
-    ]
-  },
-  {
-    id: '3', 
-    name: '化学知识库',
-    files: [
-      { id: '3-1', name: '无机化学' },
-      { id: '3-2', name: '有机化学' },
-      { id: '3-3', name: '分析化学' },
-      { id: '3-4', name: '物理化学' }
-    ]
-  },
-  {
-    id: '4', 
-    name: '语文知识库',
-    files: [
-      { id: '4-1', name: '古代文学' },
-      { id: '4-2', name: '现代文学' },
-      { id: '4-3', name: '当代文学' },
-      { id: '4-4', name: '外国文学' }
-    ]
-  },
-  {
-    id: '5', 
-    name: '英语知识库',
-    files: [
-      { id: '5-1', name: '英语语法' },
-      { id: '5-2', name: '英语阅读' },
-      { id: '5-3', name: '英语口语' },
-      { id: '5-4', name: '英语写作' }
-    ]
-  }
-])
-const selectedFile = ref('')
+const documents = ref([]) // 从API获取的文档列表
+const selectedFile = ref(null) // 改为null，避免类型不匹配
 const addedFiles = ref([]) // 已加入到聊天的文件列表
+const loadingFiles = ref(false) // 文件加载状态
 
 // 计算所有文件列表
 const allFiles = computed(() => {
-  return knowledgeBases.value.flatMap(kb => kb.files)
+  return documents.value.map(doc => ({
+    id: doc.id,
+    name: doc.title || doc.file_path,
+    type: doc.file_type,
+    size: doc.file_size
+  }))
 })
+
+// 加载文档列表
+const loadDocuments = async () => {
+  loadingFiles.value = true
+  try {
+    const response = await getDocumentList({
+      page: 1,
+      page_size: 100 // 获取更多文档供选择
+    })
+    
+    // 处理不同的响应格式
+    let docs = []
+    
+    if (response.documents) {
+      docs = response.documents
+    } else if (response.data && response.data.documents) {
+      docs = response.data.documents
+    } else if (response.data) {
+      docs = response.data
+    }
+    
+    documents.value = docs
+  } catch (error) {
+    console.error('加载文档列表失败:', error)
+    documents.value = []
+  } finally {
+    loadingFiles.value = false
+  }
+}
 
 const startDrag = (e) => {
   if (e.button !== 0) return // 只处理左键
@@ -217,10 +217,21 @@ const stopDrag = () => {
   document.removeEventListener('mouseup', stopDrag)
 }
 
-const handleClick = () => {
+const handleClick = async () => {
   if (!isDragging.value) {
     showChatWindow.value = !showChatWindow.value
-    
+
+    // 如果是打开窗口
+    if (showChatWindow.value) {
+      // 如果没有会话 ID，创建新会话
+      if (!conversationId.value) {
+        await initConversation()
+      } else {
+        // 如果有会话 ID，加载历史消息
+        await loadChatHistory()
+      }
+    }
+
     emit('click')
     if (props.onClick) {
       props.onClick()
@@ -232,53 +243,126 @@ const handleClose = () => {
   showChatWindow.value = false
   // 清空已加入的文件列表
   addedFiles.value = []
-  // 清空消息列表
-  messages.value = []
+  // 不清空消息列表，保持历史消息
+  // messages.value = []
+  // 不清空会话 ID，保持会话
+  // conversationId.value = null
 }
 
-const sendMessage = () => {
-  if (inputMessage.value.trim()) {
-    // 添加用户消息
-    messages.value.push({
-      type: 'user-message',
-      content: inputMessage.value.trim()
+// 创建新会话
+const initConversation = async () => {
+  try {
+    const response = await createConversation()
+    conversationId.value = response.conversation_id
+    // 保存到 localStorage
+    localStorage.setItem('currentConversationId', response.conversation_id)
+  } catch (error) {
+    console.error('创建会话失败:', error)
+    // 如果创建失败，使用本地模拟
+    conversationId.value = null
+  }
+}
+
+// 加载对话历史
+const loadChatHistory = async () => {
+  if (!conversationId.value) {
+    console.log('没有会话 ID，跳过加载历史')
+    return
+  }
+
+  try {
+    console.log('加载对话历史，会话 ID:', conversationId.value)
+    const response = await getChatHistory(conversationId.value)
+    
+    console.log('对话历史响应:', response)
+    console.log('消息数量:', response.messages?.length)
+    
+    // 显示最近 10 条消息
+    const recentMessages = response.messages ? response.messages.slice(-10) : []
+    
+    messages.value = recentMessages.map(msg => ({
+      type: msg.role === 'user' ? 'user-message' : 'ai-message',
+      content: msg.content
+    }))
+    
+    console.log('已加载对话历史:', messages.value.length, '条消息')
+  } catch (error) {
+    console.error('加载对话历史失败:', error)
+    // 如果加载失败，清空会话 ID
+    localStorage.removeItem('currentConversationId')
+    conversationId.value = null
+  }
+}
+
+// 发送消息
+const sendMessage = async () => {
+  if (!inputMessage.value.trim() || loading.value) return
+
+  const userMessage = inputMessage.value.trim()
+
+  // 添加用户消息到界面
+  messages.value.push({
+    type: 'user-message',
+    content: userMessage
+  })
+
+  loading.value = true
+  inputMessage.value = ''
+
+  try {
+    // 准备上下文文件列表
+    const contextFiles = addedFiles.value.map(file => file.id.toString())
+
+    // 调用API发送消息
+    const response = await sendChatMessage({
+      message: userMessage,
+      conversation_id: conversationId.value,
+      context_files: contextFiles
     })
-    
-    // 模拟回复
-    setTimeout(() => {
-      let response = '感谢你的问题！我正在处理中...' + inputMessage.value.trim()
-      
-      // 如果有已加入的文件，添加文件信息
-      if (addedFiles.value.length > 0) {
-        const fileInfo = addedFiles.value.map(file => `${file.knowledgeBase} - ${file.name}`).join('、')
-        response = `[文件：${fileInfo}] ${response}`
-      }
-      
+
+    // 更新会话 ID（如果是首次对话）
+    if (!conversationId.value && response.conversation_id) {
+      conversationId.value = response.conversation_id
+      // 保存到 localStorage
+      localStorage.setItem('currentConversationId', response.conversation_id)
+    }
+
+    // 添加AI回复到界面
+    messages.value.push({
+      type: 'ai-message',
+      content: response.ai_response || '抱歉，我暂时无法回答您的问题。'
+    })
+
+    // 如果有引用文件，显示引用信息
+    if (response.references && response.references.length > 0) {
+      const refInfo = response.references.map(ref =>
+        `📄 ${ref.file_name} (相关度: ${(ref.relevance * 100).toFixed(0)}%)`
+      ).join('\n')
+
       messages.value.push({
-        type: 'ai-message',
-        content: response
+        type: 'system-message',
+        content: `参考文件：\n${refInfo}`
       })
-    }, 1000)
-    
-    inputMessage.value = ''
+    }
+
+  } catch (error) {
+    console.error('发送消息失败:', error)
+
+    // 显示错误消息
+    messages.value.push({
+      type: 'ai-message',
+      content: '抱歉，消息发送失败，请稍后重试。'
+    })
+  } finally {
+    loading.value = false
   }
 }
 
 // 加入文件到聊天
 const addFileToChat = () => {
-  if (selectedFile.value) {
-    // 查找文件所属的知识库和文件名称
-    let selectedFileObj = null
-    let selectedKBName = ''
-    
-    for (const kb of knowledgeBases.value) {
-      const file = kb.files.find(f => f.id === selectedFile.value)
-      if (file) {
-        selectedFileObj = file
-        selectedKBName = kb.name
-        break
-      }
-    }
+  if (selectedFile.value !== null && selectedFile.value !== '') {
+    // 查找选中的文件
+    const selectedFileObj = documents.value.find(doc => doc.id == selectedFile.value)
     
     if (selectedFileObj) {
       // 检查文件是否已经加入
@@ -287,14 +371,15 @@ const addFileToChat = () => {
         // 添加到已加入文件列表
         addedFiles.value.push({
           id: selectedFile.value,
-          name: selectedFileObj.name,
-          knowledgeBase: selectedKBName
+          name: selectedFileObj.title || selectedFileObj.file_path,
+          type: selectedFileObj.file_type,
+          size: selectedFileObj.file_size
         })
         
         // 添加系统消息，说明文件已加入
         messages.value.push({
           type: 'system-message',
-          content: `已加入文件：${selectedKBName} - ${selectedFileObj.name}`
+          content: `已加入文件：${selectedFileObj.title || selectedFileObj.file_path}`
         })
       }
       
@@ -302,6 +387,11 @@ const addFileToChat = () => {
       selectedFile.value = ''
     }
   }
+}
+
+// 渲染 Markdown 内容
+const renderMarkdown = (content) => {
+  return md.render(content)
 }
 
 const updateButtonPosition = () => {
@@ -317,6 +407,7 @@ const updateButtonPosition = () => {
 }
 
 onMounted(() => {
+  loadDocuments() // 加载文档列表
   updateButtonPosition()
   window.addEventListener('resize', updateButtonPosition)
 })
@@ -398,6 +489,36 @@ onBeforeUnmount(() => {
 
 .file-select {
   width: 300px;
+  position: relative;
+  z-index: 10000;
+}
+
+/* 下拉框样式 */
+:deep(.file-select-dropdown) {
+  z-index: 10001 !important;
+  position: fixed !important;
+}
+
+/* 文件选项样式 - 整体透明白色背景 */
+:deep(.file-select-dropdown .el-select-dropdown__list) {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  padding: 8px 0;
+}
+
+/* 文件选项 - 更透明的紫红色 */
+:deep(.file-select-dropdown .el-select-dropdown__item) {
+  background-color: rgba(200, 100, 150, 0.15) !important;
+  margin: 2px 8px;
+  border-radius: 4px;
+}
+
+:deep(.file-select-dropdown .el-select-dropdown__item:hover) {
+  background-color: rgba(200, 100, 150, 0.3) !important;
+}
+
+:deep(.file-select-dropdown .el-select-dropdown__item.is-selected) {
+  background-color: rgba(200, 100, 150, 0.5) !important;
+  color: #333 !important;
 }
 
 .add-file-btn {
@@ -413,8 +534,8 @@ onBeforeUnmount(() => {
   height: 32px !important;
   padding: 0 12px !important;
   font-size: 12px !important;
-  background-color:#fff9c4!important;
-  border-color:  #fff9c4!important;
+  background-color: #fff9c4 !important;
+  border-color: #fff9c4 !important;
   color: #666 !important;
 }
 
@@ -535,7 +656,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   border: 1px solid #e0e0e0;
   position: relative;
-  max-width: 40ch;
+  max-width: 70ch;
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
@@ -550,6 +671,134 @@ onBeforeUnmount(() => {
   border-right: 12px solid white;
   border-top: 12px solid transparent;
   border-bottom: 0 solid transparent;
+}
+
+/* Markdown 内容样式 */
+.markdown-content {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.markdown-content :deep(p) {
+  margin: 0.5em 0;
+}
+
+.markdown-content :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.markdown-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-content :deep(strong) {
+  font-weight: 600;
+  color: #1a73e8;
+}
+
+.markdown-content :deep(em) {
+  font-style: italic;
+  color: #555;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  padding-left: 20px;
+  margin: 0.5em 0;
+}
+
+.markdown-content :deep(li) {
+  margin: 0.3em 0;
+}
+
+.markdown-content :deep(code) {
+  background-color: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.9em;
+  color: #e83e8c;
+}
+
+.markdown-content :deep(pre) {
+  background-color: #f6f8fa;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+
+.markdown-content :deep(pre code) {
+  background-color: transparent;
+  padding: 0;
+  color: #24292e;
+}
+
+.markdown-content :deep(blockquote) {
+  border-left: 4px solid #1a73e8;
+  padding-left: 16px;
+  margin: 0.8em 0;
+  color: #666;
+  font-style: italic;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4),
+.markdown-content :deep(h5),
+.markdown-content :deep(h6) {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #1a73e8;
+}
+
+.markdown-content :deep(h1) {
+  font-size: 1.5em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-content :deep(h2) {
+  font-size: 1.3em;
+  border-bottom: 1px solid #eaecef;
+  padding-bottom: 0.3em;
+}
+
+.markdown-content :deep(h3) {
+  font-size: 1.1em;
+}
+
+.markdown-content :deep(a) {
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.markdown-content :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.markdown-content :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  border: 1px solid #dfe2e5;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-content :deep(th) {
+  background-color: #f6f8fa;
+  font-weight: 600;
+}
+
+.markdown-content :deep(tr:nth-child(even)) {
+  background-color: rgba(0, 0, 0, 0.03);
 }
 
 /* 聊天输入区域 */

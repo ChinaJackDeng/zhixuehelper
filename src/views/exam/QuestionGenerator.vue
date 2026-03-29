@@ -13,27 +13,55 @@
           >
             <!-- 1. 标签检索 -->
             <el-form-item
-                label="知识标签"
                 prop="tags"
                 :rules="{ required: true, message: '请至少选择一个标签', trigger: 'change' }"
+                class="tag-form-item"
             >
-              <el-select
-                  v-model="configForm.tags"
-                  multiple
-                  filterable
-                  placeholder="选择知识点标签"
-                  style="width: 100%"
-                  @change="handleTagChange"
-                  size="large"
-                  class="tag-select"
-              >
+              <div class="tag-form-item-header">
+                <span class="tag-label">知识标签</span>
+                <el-button
+                    v-if="configForm.tags.length > 0"
+                    type="text"
+                    size="small"
+                    class="clear-tags-btn"
+                    @click="clearAllTags"
+                >
+                    取消全选
+                </el-button>
+              </div>
+              <div class="tag-select-container">
+                <el-select
+                    v-model="configForm.tags"
+                    multiple
+                    filterable
+                    placeholder="选择知识点标签"
+                    style="width: 100%"
+                    @change="handleTagChange"
+                    size="large"
+                    class="tag-select"
+                    :loading="loadingTags"
+                    collapse-tags
+                    collapse-tags-tooltip
+                    max-collapse-tags="8"
+                >
                 <el-option
                     v-for="tag in availableTags"
-                    :key="tag"
-                    :label="tag"
-                    :value="tag"
-                />
+                    :key="tag.id"
+                    :label="tag.name"
+                    :value="tag.id"
+                >
+                  <div class="tag-option">
+                    <span class="tag-option-name">{{ tag.name }}</span>
+                    <el-tag
+                        v-if="tag.color"
+                        :color="tag.color"
+                        size="small"
+                        effect="plain"
+                    />
+                  </div>
+                </el-option>
               </el-select>
+              </div>
             </el-form-item>
 
             <!-- 2. 文件选择 -->
@@ -42,7 +70,11 @@
                 prop="selectedFiles"
                 :rules="{ required: true, message: '请至少选择一个文件', trigger: 'change' }"
             >
-              <el-checkbox-group v-model="configForm.selectedFiles" class="file-checkbox-group">
+              <div v-if="loadingFiles" class="loading-container">
+                <el-icon class="loading-icon"><Loading /></el-icon>
+                <span>加载文件中...</span>
+              </div>
+              <el-checkbox-group v-else v-model="configForm.selectedFiles" class="file-checkbox-group">
                 <el-checkbox
                     v-for="file in filteredFiles"
                     :key="file.id"
@@ -50,14 +82,14 @@
                     class="file-checkbox"
                 >
                   <div class="file-info">
-                    <div class="file-name">{{ file.name }}</div>
+                    <div class="file-name">{{ file.name || file.title }}</div>
                     <div class="file-meta">
-                      <span class="file-size">{{ formatFileSize(file.size) }}</span>
+                      <span class="file-size">{{ formatFileSize(file.file_size ?? file.size ?? file.metadata?.file_size ?? 0) }}</span>
                     </div>
                   </div>
                 </el-checkbox>
               </el-checkbox-group>
-              <el-empty v-if="filteredFiles.length === 0" description="暂无匹配的知识文件" />
+              <el-empty v-if="!loadingFiles && filteredFiles.length === 0" description="暂无匹配的知识文件" />
             </el-form-item>
 
             <!-- 3. 题型选择 -->
@@ -287,18 +319,27 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  MagicStick, Refresh, Check, ArrowLeft, ArrowRight
+  MagicStick, Refresh, Check, ArrowLeft, ArrowRight, Loading
 } from '@element-plus/icons-vue'
 import { Minus, Plus } from '@element-plus/icons-vue'
+import {
+  getTagList,
+  getDocumentList,
+  searchDocumentsByTags
+} from '@/api/knowledge'
 // 表单数据
 const configFormRef = ref(null)
 const generating = ref(false)
 const showAnswer = ref(false)
 const showExplanation = ref(false)
 const currentQuestionIndex = ref(0)
+
+// 加载状态
+const loadingTags = ref(false)
+const loadingFiles = ref(false)
 
 const configForm = reactive({
   tags: [],
@@ -325,26 +366,18 @@ const questionTypes = [
   { value: 'essay', label: '简答题' }
 ]
 
-// 模拟数据
-const availableTags = ref(['数学', '物理', '化学', '英语', '编程', '历史', '地理', '生物'])
-const allFiles = ref([
-  { id: 1, name: '高等数学上册知识点总结', tags: ['数学'], size: 1024000 },
-  { id: 2, name: '物理力学公式大全', tags: ['物理'], size: 512000 },
-  { id: 3, name: '化学反应方程式汇总', tags: ['化学'], size: 768000 },
-  { id: 4, name: '英语语法精讲', tags: ['英语'], size: 1280000 },
-  { id: 5, name: 'JavaScript基础教程', tags: ['编程'], size: 2048000 },
-  { id: 6, name: '中国历史朝代顺序表', tags: ['历史'], size: 256000 },
-  { id: 7, name: '世界地理知识要点', tags: ['地理'], size: 896000 },
-  { id: 8, name: '生物学基础知识', tags: ['生物'], size: 640000 }
-])
-
+// 真实数据
+const availableTags = ref([])
+const allFiles = ref([])
 const generatedQuestions = ref([])
 
 // 计算属性
 const filteredFiles = computed(() => {
   if (configForm.tags.length === 0) return allFiles.value
   return allFiles.value.filter(file => 
-    configForm.tags.some(tag => file.tags.includes(tag))
+    file.tags && configForm.tags.some(tagId => 
+      file.tags.some(tag => tag.id === tagId)
+    )
   )
 })
 
@@ -356,6 +389,65 @@ const canGenerate = computed(() => {
   return configForm.tags.length > 0 && 
          configForm.selectedFiles.length > 0 && 
          configForm.questionTypes.length > 0
+})
+
+// 加载标签列表
+const loadTags = async () => {
+  loadingTags.value = true
+  try {
+    // 加载所有标签（智能标签和自定义标签）
+    const smartResponse = await getTagList('smart')
+    const customResponse = await getTagList('custom')
+    
+    const smartTags = smartResponse.data?.tags || smartResponse.tags || []
+    const customTags = customResponse.data?.tags || customResponse.tags || []
+    
+    // 合并标签并去重
+    const allTags = [...smartTags, ...customTags]
+    availableTags.value = allTags
+  } catch (error) {
+    console.error('加载标签失败:', error)
+    ElMessage.error('加载标签失败')
+  } finally {
+    loadingTags.value = false
+  }
+}
+
+// 加载文件列表
+const loadFiles = async (tagIds = []) => {
+  loadingFiles.value = true
+  try {
+    if (tagIds.length > 0) {
+      // 按标签筛选文件
+      const response = await searchDocumentsByTags({
+        tag_ids: tagIds,
+        match_mode: 'or',
+        page: 1,
+        page_size: 50
+      })
+      
+      allFiles.value = response.data?.documents || response.documents || []
+    } else {
+      // 获取所有文件
+      const response = await getDocumentList({
+        page: 1,
+        page_size: 50
+      })
+      
+      allFiles.value = response.data?.documents || response.documents || []
+    }
+  } catch (error) {
+    console.error('加载文件失败:', error)
+    ElMessage.error('加载文件失败')
+  } finally {
+    loadingFiles.value = false
+  }
+}
+
+// 组件挂载时加载数据
+onMounted(async () => {
+  await loadTags()
+  await loadFiles()
 })
 
 // 工具方法
@@ -419,8 +511,16 @@ const formatFileSize = (size) => {
 }
 
 // 事件处理
-const handleTagChange = () => {
+const handleTagChange = async () => {
   configForm.selectedFiles = []
+  await loadFiles(configForm.tags)
+}
+
+// 取消全选标签
+const clearAllTags = async () => {
+  configForm.tags = []
+  configForm.selectedFiles = []
+  await loadFiles([])
 }
 
 const generateQuestions = async () => {
@@ -526,7 +626,7 @@ const goToQuestion = (index) => {
   min-height: 100vh;
   background: linear-gradient(135deg, #f8f9fa 0%, #eef5ff 100%);
   padding: 24px;
-   margin-left: 30px;
+  margin-left: 30px;
   margin-right: 30px;
   box-sizing: border-box;
 }
@@ -535,7 +635,7 @@ const goToQuestion = (index) => {
   display: flex;
   height: 100%;
   gap: 24px;
-  height: calc(100vh - 180px);
+  height: calc(100vh - 140px);
 }
 
 .config-section {
@@ -570,6 +670,29 @@ const goToQuestion = (index) => {
   border-radius: 12px;
   padding: 16px;
   background: #fafafa;
+}
+
+.loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  border: 1px solid #e4e7ed;
+  border-radius: 12px;
+  background: #fafafa;
+  color: #666;
+  font-size: 14px;
+}
+
+.loading-icon {
+  margin-right: 10px;
+  font-size: 20px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .file-checkbox {
@@ -803,9 +926,40 @@ const goToQuestion = (index) => {
   margin-top: auto;
 }
 
+/* 标签表单项目 */
+.tag-form-item {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+/* 标签表单项目头部 */
+.tag-form-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  height: 24px;
+}
+
+/* 标签文本 */
+.tag-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+  line-height: 24px;
+}
+
+/* 标签选择器容器 */
+.tag-select-container {
+  position: relative;
+  width: 100%;
+  margin-top: 0; /* 不需要上边距，因为已经在tag-form-item-header中设置了margin-bottom */
+}
+
 /* 增大标签选择器的字体和尺寸 */
 .tag-select {
   font-size: 16px;
+  width: 100%;
 }
 
 .tag-select :deep(.el-select__wrapper) {
@@ -830,20 +984,93 @@ const goToQuestion = (index) => {
 }
 
 .tag-select :deep(.el-select__selected-item) {
-  font-size: 14px;
+  font-size: 15px; /* 增大1px */
   margin: 4px 8px 4px 0;
-  padding: 4px 12px;
+  padding: 5px 12px;
   border-radius: 16px;
+  font-weight: 500;
 }
 
 /* 增大选项的字体大小 */
 .tag-select :deep(.el-select-dropdown__item) {
   font-size: 15px;
-  padding: 12px 16px;
+  padding: 8px 16px;
+  height: auto;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+/* 可选标签的透明蓝色背景 */
+.tag-select :deep(.el-select-dropdown__item) {
+  background-color: transparent;
+  border-radius: 4px;
+  margin: 2px 8px;
+  transition: all 0.3s ease;
 }
 
 .tag-select :deep(.el-select-dropdown__item:hover) {
-  background-color: #f0f7ff;
+  background-color: rgba(64, 158, 255, 0.1); /* 透明的蓝色 */
+  border-radius: 4px;
+}
+
+/* 确保背景与标签名高度吻合 */
+.tag-select :deep(.el-select-dropdown__item span) {
+  display: inline-block;
+  line-height: 1.4;
+}
+
+/* 标签选项样式 */
+.tag-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  height: 100%;
+}
+
+.tag-option-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #333;
+  flex: 1;
+}
+
+.tag-option :deep(.el-tag) {
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+/* 增大已选标签的字体 */
+.tag-select :deep(.el-select__tags) {
+  font-size: 15px;
+}
+
+.tag-select :deep(.el-select__tags .el-tag) {
+  font-size: 15px; /* 增大1px */
+  padding: 6px 12px;
+  margin: 4px 6px 4px 0;
+  font-weight: 500;
+}
+
+/* 取消全选按钮 */
+.clear-tags-btn {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #409EFF;
+  padding: 4px 12px;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+  background-color: #ecf5ff; /* 淡蓝色背景 */
+  margin-left: 20px;
+}
+
+.clear-tags-btn:hover {
+  color: #409EFF;
+  background-color: #d9ecff;
+  border-color: #c6e2ff;
 }
 
 .preview-header {
