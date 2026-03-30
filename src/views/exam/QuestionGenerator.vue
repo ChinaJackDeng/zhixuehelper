@@ -14,7 +14,6 @@
             <!-- 1. 标签检索 -->
             <el-form-item
                 prop="tags"
-                :rules="{ required: true, message: '请至少选择一个标签', trigger: 'change' }"
                 class="tag-form-item"
             >
               <div class="tag-form-item-header">
@@ -26,7 +25,7 @@
                     class="clear-tags-btn"
                     @click="clearAllTags"
                 >
-                    取消全选
+                    取消选择
                 </el-button>
               </div>
               <div class="tag-select-container">
@@ -174,16 +173,25 @@
 
             <!-- 生成按钮 -->
             <div class="form-actions">
-              <el-button @click="resetConfig" size="large">重置</el-button>
+              <el-button @click="resetConfig" size="large" :disabled="generating">重置</el-button>
               <el-button
+                  v-if="generating"
+                  type="danger"
+                  :icon="Close"
+                  @click="stopGeneration"
+                  size="large"
+              >
+                停止生成
+              </el-button>
+              <el-button
+                  v-else
                   type="primary"
                   :icon="MagicStick"
-                  :loading="generating"
                   @click="generateQuestions"
                   :disabled="!canGenerate"
                   size="large"
               >
-                {{ generating ? '生成中...' : '开始生成' }}
+                开始生成
               </el-button>
             </div>
           </el-form>
@@ -210,7 +218,22 @@
 
           <!-- 题目卡片 -->
           <div class="question-card-container">
-            <el-empty v-if="generatedQuestions.length === 0" description="生成题目后将显示在此处" />
+            <!-- 加载动画 -->
+            <div v-if="generating" class="loading-animation">
+              <div class="loading-spinner"></div>
+              <div class="loading-text">
+                <div class="loading-title">正在生成题目</div>
+                <div class="loading-subtitle">{{ currentStep || 'AI 正在分析文档并创建题目...' }}</div>
+                <div class="loading-progress">
+                  <div class="progress-bar">
+                    <div class="progress-fill" :style="{ width: generationProgress + '%' }"></div>
+                  </div>
+                  <div class="progress-text">{{ generationProgress }}%</div>
+                </div>
+              </div>
+            </div>
+            
+            <el-empty v-else-if="generatedQuestions.length === 0" description="生成题目后将显示在此处" />
             
             <div v-else class="question-card">
               <!-- 题目头部 -->
@@ -322,7 +345,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  MagicStick, Refresh, Check, ArrowLeft, ArrowRight, Loading
+  MagicStick, Refresh, Check, ArrowLeft, ArrowRight, Loading, Close
 } from '@element-plus/icons-vue'
 import { Minus, Plus } from '@element-plus/icons-vue'
 import {
@@ -330,16 +353,25 @@ import {
   getDocumentList,
   searchDocumentsByTags
 } from '@/api/knowledge'
+import {
+  generateQuestions as apiGenerateQuestions,
+  getGenerationProgress,
+  saveQuestions as apiSaveQuestions
+} from '@/api/exam'
 // 表单数据
 const configFormRef = ref(null)
 const generating = ref(false)
 const showAnswer = ref(false)
 const showExplanation = ref(false)
 const currentQuestionIndex = ref(0)
+const pollTimer = ref(null) // 轮询定时器 ID
+const shouldStopPolling = ref(false) // 是否应该停止轮询
 
 // 加载状态
 const loadingTags = ref(false)
 const loadingFiles = ref(false)
+const generationProgress = ref(0) // 生成进度百分比
+const currentStep = ref('') // 当前生成步骤
 
 const configForm = reactive({
   tags: [],
@@ -386,8 +418,7 @@ const currentQuestion = computed(() => {
 })
 
 const canGenerate = computed(() => {
-  return configForm.tags.length > 0 && 
-         configForm.selectedFiles.length > 0 && 
+  return configForm.selectedFiles.length > 0 && 
          configForm.questionTypes.length > 0
 })
 
@@ -455,6 +486,18 @@ const getTagType = (type) => {
   const map = { single: '', multi: 'warning', judge: 'success', fill: 'info', essay: 'danger' }
   return map[type] || ''
 }
+
+const getTypeLabel = (type) => {
+  const map = { 
+    single: '单选题', 
+    multi: '多选题', 
+    judge: '判断题', 
+    fill: '填空题', 
+    essay: '简答题' 
+  }
+  return map[type] || type
+}
+
 const toggleQuestionType = (type) => {
   const index = configForm.questionTypes.indexOf(type)
   if (index === -1) {
@@ -530,45 +573,186 @@ const generateQuestions = async () => {
   }
 
   generating.value = true
-  // 模拟API请求
-  await new Promise(resolve => setTimeout(resolve, 2000))
+  generationProgress.value = 0
+  currentStep.value = '准备生成题目...'
+  
+  try {
+    // 计算总题目数
+    const totalQuestions = configForm.questionTypes.reduce((sum, type) => {
+      return sum + (typeCounts[type] || 0)
+    }, 0)
 
-  // 生成题目
-  const questions = []
-  let id = Date.now()
+    // 调用 API 生成题目
+    const response = await apiGenerateQuestions({
+      question_types: configForm.questionTypes,
+      document_ids: configForm.selectedFiles,
+      tags: configForm.tags,
+      difficulty: configForm.difficulty,
+      question_count: totalQuestions,
+      include_answers: true,
+      include_analysis: true,
+      question_set_name: configForm.questionSetName,
+      bind_type: configForm.bindType,
+      type_counts: typeCounts
+    })
 
-  // 根据选择的题型和数量生成题目
-  configForm.questionTypes.forEach(type => {
-    const count = typeCounts[type]
-    for (let i = 0; i < count; i++) {
-      questions.push({
-        id: id++,
-        type,
-        difficulty: configForm.difficulty === 'mixed'
-            ? ['easy', 'medium', 'hard'][i % 3]
-            : configForm.difficulty,
-        tags: configForm.tags.slice(0, 2),
-        stem: `【${getTypeLabel(type)}】这是一道关于${configForm.tags[0]}的题目，来源于文件：${allFiles.value.find(f => f.id === configForm.selectedFiles[0])?.name}`,
-        options: ['single', 'multi'].includes(type)
-            ? [
-              { key: 'A', text: '选项A内容' },
-              { key: 'B', text: '选项B内容' },
-              { key: 'C', text: '选项C内容' },
-              { key: 'D', text: '选项D内容' }
-            ]
-            : undefined,
-        answer: type === 'judge' ? (i % 2 === 0) : ['A', 'B', 'C', 'D'][i % 4],
-        explanation: '这是题目的详细解析，帮助理解知识点和解题思路。'
+    console.log('生成题目响应:', response)
+
+    // 如果立即返回了题目
+    if (response.questions && response.questions.length > 0) {
+      // 转换题型和字段：后端返回 choice -> 前端使用 single, content -> stem
+      const convertedQuestions = response.questions.map(q => {
+        console.log('原始题目数据:', q)
+        return {
+          ...q,
+          type: q.type === 'choice' ? 'single' : q.type,
+          stem: q.content,  // 将 content 映射为 stem
+          options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : []
+        }
       })
+      
+      console.log('转换后的题目数据:', convertedQuestions)
+      generatedQuestions.value = convertedQuestions
+      currentQuestionIndex.value = 0
+      showAnswer.value = false
+      showExplanation.value = false
+      // 题目数据准备好后才关闭加载动画
+      generating.value = false
+      generationProgress.value = 0
+      currentStep.value = ''
+      ElMessage.success(`成功生成 ${convertedQuestions.length} 道题目`)
+    } else if (response.task_id) {
+      // 如果是异步任务，轮询查询进度（直到获取到题目）
+      currentStep.value = '题目生成中...'
+      await pollGenerationProgress(response.task_id)
+      // pollGenerationProgress 内部会在获取到题目后关闭加载动画
+    } else {
+      ElMessage.error('生成失败，请稍后重试')
+      generating.value = false
+      generationProgress.value = 0
+      currentStep.value = ''
     }
-  })
 
-  generatedQuestions.value = questions
-  currentQuestionIndex.value = 0
-  showAnswer.value = false
-  showExplanation.value = false
+  } catch (error) {
+    console.error('生成题目失败:', error)
+    ElMessage.error(error.response?.data?.detail || '生成题目失败，请稍后重试')
+    generating.value = false
+    generationProgress.value = 0
+    currentStep.value = ''
+  }
+}
+
+// 轮询生成进度
+const pollGenerationProgress = async (taskId) => {
+  const maxAttempts = 30 // 最多轮询 30 次
+  const interval = 2000 // 每 2 秒查询一次
+  let attempts = 0
+
+  // 初始进度
+  generationProgress.value = 10
+  currentStep.value = '正在分析文档...'
+  shouldStopPolling.value = false
+
+  const poll = async () => {
+    // 检查是否应该停止
+    if (shouldStopPolling.value) {
+      console.log('用户取消生成')
+      return
+    }
+
+    try {
+      const progress = await getGenerationProgress(taskId)
+      console.log('生成进度:', progress)
+
+      // 更新进度显示
+      if (progress.progress !== undefined) {
+        // 确保进度至少为 10%，避免进度条不显示
+        generationProgress.value = Math.max(10, progress.progress)
+      }
+      if (progress.current_step) {
+        currentStep.value = progress.current_step
+      }
+
+      if (progress.status === 'completed' && progress.questions) {
+        // 设置进度为 100%
+        generationProgress.value = 100
+        currentStep.value = '题目生成完成'
+        
+        // 稍微延迟显示结果，让用户看到 100% 的进度
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // 转换题型和字段：后端返回 choice -> 前端使用 single, content -> stem
+        const convertedQuestions = progress.questions.map(q => {
+          console.log('原始题目数据 (轮询):', q)
+          return {
+            ...q,
+            type: q.type === 'choice' ? 'single' : q.type,
+            stem: q.content,  // 将 content 映射为 stem
+            options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : []
+          }
+        })
+        
+        console.log('转换后的题目数据 (轮询):', convertedQuestions)
+        generatedQuestions.value = convertedQuestions
+        currentQuestionIndex.value = 0
+        showAnswer.value = false
+        showExplanation.value = false
+        // 题目数据准备好后才关闭加载动画
+        generating.value = false
+        generationProgress.value = 0
+        currentStep.value = ''
+        ElMessage.success(`成功生成 ${convertedQuestions.length} 道题目`)
+        return
+      }
+
+      if (progress.status === 'failed') {
+        ElMessage.error(progress.error_message || '生成失败')
+        generating.value = false
+        generationProgress.value = 0
+        currentStep.value = ''
+        return
+      }
+
+      attempts++
+      if (attempts >= maxAttempts) {
+        ElMessage.warning('生成超时，请稍后重试')
+        generating.value = false
+        generationProgress.value = 0
+        currentStep.value = ''
+        return
+      }
+
+      // 继续轮询
+      pollTimer.value = setTimeout(poll, interval)
+
+    } catch (error) {
+      console.error('查询进度失败:', error)
+      ElMessage.error('查询进度失败')
+      generating.value = false
+      generationProgress.value = 0
+      currentStep.value = ''
+    }
+  }
+
+  // 启动轮询
+  poll()
+}
+
+// 停止生成
+const stopGeneration = () => {
+  // 设置停止标志
+  shouldStopPolling.value = true
+  
+  // 清除定时器
+  if (pollTimer.value) {
+    clearTimeout(pollTimer.value)
+    pollTimer.value = null
+  }
+  
   generating.value = false
-  ElMessage.success(`成功生成 ${questions.length} 道题目`)
+  generationProgress.value = 0
+  currentStep.value = ''
+  ElMessage.info('已停止生成题目')
 }
 
 const resetConfig = () => {
@@ -587,15 +771,65 @@ const regenerate = () => {
   generateQuestions()
 }
 
-const saveQuestions = () => {
-  ElMessageBox.confirm(
+const saveQuestions = async () => {
+  if (generatedQuestions.value.length === 0) {
+    ElMessage.warning('没有可保存的题目')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
       `确认保存 ${generatedQuestions.value.length} 道题目？`,
       '保存题目',
       { type: 'success', confirmButtonText: '确认', cancelButtonText: '取消' }
-  ).then(() => {
-    ElMessage.success('题目保存成功')
+    )
+
+    // 转换题目格式为后端要求的格式
+    const formattedQuestions = generatedQuestions.value.map(q => {
+      // 转换题型：前端 single -> 后端 choice
+      const backendType = q.type === 'single' ? 'choice' : q.type
+      
+      // 转换选项格式：数组 -> 对象
+      let options = null
+      if (q.options && Array.isArray(q.options)) {
+        options = {}
+        q.options.forEach(opt => {
+          options[opt.key] = opt.text
+        })
+      }
+
+      return {
+        content: q.stem,  // stem -> content
+        type: backendType,
+        options: options,
+        answer: q.answer,
+        analysis: q.explanation,  // explanation -> analysis
+        difficulty: q.difficulty || 'medium',
+        tags: configForm.tags,  // 直接使用当前选择的标签ID数组
+        source_document_id: configForm.selectedFiles[0] ? Number(configForm.selectedFiles[0]) : null
+      }
+    })
+
+    // 调试信息
+    console.log('准备保存的题目格式:', {
+      questions: formattedQuestions,
+      save_mode: 'append'
+    })
+
+    // 调用 API 保存题目
+    const response = await apiSaveQuestions(formattedQuestions, 'append')
+    
+    console.log('保存题目响应:', response)
+    
+    ElMessage.success(`成功保存 ${response.saved_count || generatedQuestions.value.length} 道题目`)
     resetConfig()
-  })
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('保存题目失败:', error)
+      console.error('错误详情:', error.response?.data)
+      ElMessage.error(error.response?.data?.detail || error.response?.data?.message || error.response?.data?.error || '保存题目失败，请稍后重试')
+    }
+  }
 }
 
 const prevQuestion = () => {
@@ -1216,11 +1450,13 @@ const goToQuestion = (index) => {
 }
 
 .question-indexes {
-  max-height: 60px;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .question-indexes :deep(.el-scrollbar__wrap) {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
   gap: 8px;
   padding-bottom: 10px;
 }
@@ -1267,5 +1503,73 @@ const goToQuestion = (index) => {
     height: auto;
     min-height: 400px;
   }
+}
+
+/* 加载动画样式 */
+.loading-animation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  padding: 40px;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 60px;
+  height: 60px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #409EFF;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 24px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.loading-subtitle {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 24px;
+  line-height: 1.4;
+}
+
+.loading-progress {
+  width: 100%;
+  max-width: 300px;
+  margin-top: 16px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: #f0f0f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: #409EFF;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.progress-text {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
 }
 </style>
