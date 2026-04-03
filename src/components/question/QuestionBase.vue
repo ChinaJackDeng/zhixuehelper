@@ -3,7 +3,7 @@
     <!-- 题目头部 -->
     <div class="q-header">
       <el-tag size="small" :type="tagType">{{ typeLabel }}</el-tag>
-      <el-tag size="small" effect="plain">{{ question.difficulty }}</el-tag>
+      <el-tag size="small" effect="plain">{{ difficultyLabel }}</el-tag>
     </div>
 
     <!-- 题干 -->
@@ -58,7 +58,7 @@ const props = defineProps({
     // { id, type, stem, options?, answer, explanation, difficulty, tags }
   },
   modelValue: {},  // 用户答案
-  index: { type: Number, default: 1 },
+  index: { type: Number, default:1 },
   showFeedback: { type: Boolean, default: false },
   isCorrect: { type: Boolean, default: false },
   showExplanationToggle: { type: Boolean, default: false }
@@ -80,6 +80,15 @@ const tagType = computed(() => {
     fill: 'info', essay: 'danger'
   }
   return map[props.question.type] || ''
+})
+
+const difficultyLabel = computed(() => {
+  const map = {
+    easy: '简单',
+    medium: '中等',
+    hard: '困难'
+  }
+  return map[props.question.difficulty] || props.question.difficulty || '未知'
 })
 
 const formattedAnswer = computed(() => {
@@ -106,7 +115,7 @@ const formattedAnswer = computed(() => {
   gap: 8px;
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom:1px solid #f0f0f0;
   font-size: 14px;
 }
 
@@ -118,7 +127,7 @@ const formattedAnswer = computed(() => {
 
 .q-stem {
   font-size: 16px;
-  line-height: 1.5;
+  line-height:1.5;
   color: #333;
   margin-bottom: 16px;
   display: flex;
@@ -134,7 +143,7 @@ const formattedAnswer = computed(() => {
 }
 
 .q-content {
-  flex: 1;
+  flex:1;
   color: #333;
   font-size: 16px;
 }
@@ -142,7 +151,7 @@ const formattedAnswer = computed(() => {
 .feedback-section {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  border-top:1px solid #f0f0f0;
   font-size: 14px;
 }
 
@@ -153,11 +162,11 @@ const formattedAnswer = computed(() => {
   border-radius: 8px;
   font-size: 14px;
   color: var(--text-regular);
-  border: 1px solid #e8e8e8;
+  border:1px solid #e8e8e8;
 }
 
 .answer-detail p {
-  margin: 6px 0;
+  margin:6px 0;
   font-size: 14px;
 }
 
@@ -174,12 +183,12 @@ const formattedAnswer = computed(() => {
   border-radius: 0 8px 8px 0;
   font-size: 14px;
   color: var(--text-regular);
-  line-height: 1.5;
+  line-height:1.5;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .explanation p {
-  margin: 6px 0 0 0;
+  margin:6px 0 0 0;
   font-size: 14px;
 }
 </style>

@@ -5,7 +5,7 @@
     <div class="top-action-bar">
       <!-- 搜索区域 -->
       <div class="search-section">
-        <el-select v-model="searchType" placeholder="搜索类型" size="default" style="width: 240px;">
+        <el-select v-model="searchType" placeholder="搜索类型" size="default" class="search-type-select">
           <el-option label="全部文件" value="all" />
           <el-option label="混合搜索" value="hybrid" />
           <el-option label="关键词搜索" value="keyword" />
@@ -17,12 +17,14 @@
             clearable
             @clear="handleSearch"
             @keyup.enter="handleSearch"
+            class="search-input"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button type="primary" @click="handleSearch">搜索</el-button>
+        <el-button type="primary" @click="handleSearch" :loading="isSearching">搜索</el-button>
+        <el-button v-if="searchKeyword || selectedTags.length > 0" @click="resetSearchAndFilters">重置筛选</el-button>
       </div>
 
       <!-- 操作按钮组 -->
@@ -46,6 +48,13 @@
           粘贴文本
         </el-button>
       </div>
+    </div>
+    
+    <div class="quick-stats">
+      <el-tag effect="plain" type="info">文档 {{ filteredDocuments.length }}</el-tag>
+      <el-tag effect="plain" type="warning">标签 {{ totalTagCount }}</el-tag>
+      <el-tag effect="plain" type="success">已选标签 {{ selectedTags.length }}</el-tag>
+      <el-tag v-if="selectedDoc" effect="plain">当前文档 {{ selectedDoc.title }}</el-tag>
     </div>
 
     <!-- 搜索结果信息 -->
@@ -228,6 +237,9 @@
         <div v-else>
           <!-- 文档头部信息区：标题、信息 -->
           <div class="doc-header-section">
+            <div class="detail-head-actions">
+              <el-button text @click="selectedDoc = null">收起详情</el-button>
+            </div>
             <!-- 文档标题 -->
             <div class="doc-title-container">
               <h3 class="doc-title">{{ selectedDoc.title }}</h3>
@@ -632,6 +644,8 @@ const filteredDocuments = computed(() => {
   return result
 })
 
+const totalTagCount = computed(() => smartTags.value.length + customTags.value.length)
+
 const renderedMarkdown = computed(() => {
   if (!selectedDoc.value?.content) return ''
   return marked(selectedDoc.value.content)
@@ -829,6 +843,19 @@ const handleSearch = async () => {
   } finally {
     isSearching.value = false
   }
+}
+
+const resetSearchAndFilters = async () => {
+  searchKeyword.value = ''
+  searchType.value = 'all'
+  selectedTags.value = []
+  searchResults.value = {
+    total: 0,
+    type: '',
+    keyword: ''
+  }
+  currentPage.value = 1
+  await loadDocuments()
 }
 
 const handleFileUpload = async (options) => {
@@ -1168,7 +1195,7 @@ const addTagsToSelectedDoc = async () => {
 const handleGenerateFromDoc = () => {
   if (selectedDoc.value) {
     router.push({
-      path: '/question-bank/generate',
+      path: '/exam',
       query: {
         docId: selectedDoc.value.id,
         docTitle: selectedDoc.value.title
@@ -1338,19 +1365,31 @@ watch(tagMatchMode, async () => {
 
 .top-action-bar {
   background: white;
-  padding: 20px;
+  padding: 14px 20px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 20px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .search-section {
   display: flex;
   gap: 12px;
   flex: 1;
-  max-width: 800px;
+  max-width: 980px;
+}
+
+.search-type-select {
+  width: 180px;
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
 }
 
 
@@ -1359,9 +1398,16 @@ watch(tagMatchMode, async () => {
   gap: 12px;
 }
 
+.quick-stats {
+  padding: 10px 20px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tag-filter-section {
   background: white;
-  padding: 16px 20px;
+  padding: 12px 20px;
   border-bottom: 1px solid #e4e7ed;
 }
 
@@ -1394,7 +1440,7 @@ watch(tagMatchMode, async () => {
 }
 
 .tag-cloud {
-  max-height: 100px;
+  max-height: 84px;
 }
 
 .tag-list {
@@ -1487,26 +1533,29 @@ watch(tagMatchMode, async () => {
 .main-content-area {
   flex: 1;
   display: flex;
-  gap: 20px;
-  padding: 20px;
+  gap: 16px;
+  padding: 14px 20px 20px;
   overflow: hidden;
 }
 
 .knowledge-list-panel {
-  background: white;
-  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border-radius: 10px;
+  border: 1px solid #e8eef8;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transition: width 0.3s;
+  box-shadow: 0 8px 26px rgba(28, 65, 123, 0.08);
 }
 
 .panel-header {
-  padding: 20px;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e8eef8;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: linear-gradient(90deg, #f5f9ff 0%, #ffffff 100%);
 }
 
 .panel-header h3 {
@@ -1532,16 +1581,18 @@ watch(tagMatchMode, async () => {
 
 .documents-grid {
   flex: 1;
-  padding: 20px;
+  padding: 14px 16px;
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   grid-auto-rows: min-content;
-  gap: 26px 12px;
+  gap: 10px 8px;
+  align-items: start;
   overflow-y: auto;
+  align-content: start;
 }
 
 .pagination-container {
-  padding: 30px 20px;
+  padding: 14px 16px;
   border-top: 1px solid #e4e7ed;
   display: flex;
   justify-content: center;
@@ -1552,10 +1603,15 @@ watch(tagMatchMode, async () => {
 .detail-panel {
   width: 40%;
   background: white;
-  border-radius: 8px;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.detail-head-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .empty-detail {
@@ -1616,12 +1672,12 @@ watch(tagMatchMode, async () => {
 
 /* 文档头部信息区：标题、标签、信息上下结构 */
 .doc-header-section {
-  padding: 16px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .doc-title-container {
@@ -1670,7 +1726,7 @@ watch(tagMatchMode, async () => {
 
 /* 文档标签区：显示在文档信息和内容之间 */
 .doc-tags-section {
-  padding: 8px 20px;
+  padding: 8px 16px;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
   background: #fafafa;
@@ -1704,7 +1760,7 @@ watch(tagMatchMode, async () => {
 
 /* 文档元数据区：推荐标签和关键词 */
 .doc-metadata-section {
-  padding: 12px 20px;
+  padding: 10px 16px;
   border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
   display: flex;
@@ -1752,7 +1808,7 @@ watch(tagMatchMode, async () => {
 }
 
 .doc-content-section {
-  padding: 16px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid #e4e7ed;
   flex: 7;
   display: flex;
@@ -1806,7 +1862,7 @@ watch(tagMatchMode, async () => {
 }
 
 .markdown-content {
-  padding: 20px;
+  padding: 14px;
   line-height: 1.8;
   color: #333;
   font-size: 16px;
@@ -1973,5 +2029,30 @@ watch(tagMatchMode, async () => {
 
 .paste-dialog :deep(.el-dialog__body) {
   padding: 20px 30px;
+}
+
+@media (max-width: 1200px) {
+  .top-action-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .search-section {
+    max-width: 100%;
+  }
+
+  .main-content-area {
+    flex-direction: column;
+  }
+
+  .knowledge-list-panel,
+  .detail-panel {
+    width: 100% !important;
+  }
+
+  .documents-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 </style>

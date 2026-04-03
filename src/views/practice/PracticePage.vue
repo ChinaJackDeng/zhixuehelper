@@ -148,7 +148,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import QuestionNavigator from '@/components/practice/QuestionNavigator.vue'
 import SingleQuestion from '@/components/question/SingleQuestion.vue'
@@ -156,28 +156,16 @@ import MultiQuestion from '@/components/question/MultiQuestion.vue'
 import JudgeQuestion from '@/components/question/JudgeQuestion.vue'
 import FillQuestion from '@/components/question/FillQuestion.vue'
 import EssayQuestion from '@/components/question/EssayQuestion.vue'
+import {
+  getQuestionSets,
+  getQuestionSetDetail,
+  savePracticeProgress,
+  getPracticeProgress,
+  submitExam as submitExamApi,
+  getExamReport
+} from '@/api/exam'
 
-const sets = ref([
-  {
-    id: 'set1',
-    name: '数学基础题库',
-    questions: [
-      { id: 'q1', type: 'single', stem: '2+2=?', options: [{key:'A',text:'3'},{key:'B',text:'4'},{key:'C',text:'5'}], answer: 'B', explanation: '2+2=4', difficulty: '简单', knowledge: '基础运算' },
-      { id: 'q2', type: 'multi', stem: '下列哪些是质数？', options: [{key:'A',text:'2'},{key:'B',text:'4'},{key:'C',text:'3'}], answer: ['A','C'], explanation: '2和3是质数', difficulty: '中等', knowledge: '质数' },
-      { id: 'q3', type: 'judge', stem: '0 是自然数。', answer: true, explanation: '按常规定义，0 是自然数', difficulty: '简单', knowledge: '自然数' },
-      { id: 'q4', type: 'fill', stem: '圆的周长公式：C=', answer: '2πr', explanation: '周长=2πr', difficulty: '简单', knowledge: '圆的周长' },
-      { id: 'q5', type: 'essay', stem: '简述勾股定理。', answer: '', explanation: '直角三角形斜边的平方等于两直角边平方和', difficulty: '难', knowledge: '勾股定理' }
-    ]
-  },
-  {
-    id: 'set2',
-    name: '英语基础题库',
-    questions: [
-      { id: 'e1', type: 'single', stem: 'What is plural of "child"?', options:[{key:'A',text:'childs'},{key:'B',text:'children'},{key:'C',text:'childes'}], answer: 'B', explanation: '', difficulty: '简单', knowledge: '名词复数' }
-    ]
-  }
-])
-
+const sets = ref([])
 const loading = ref(false)
 const selectedSetId = ref(null)
 const currentSet = computed(() => sets.value.find(s => s.id === selectedSetId.value))
@@ -196,7 +184,7 @@ const correctMap = reactive({})
 const showExplanationSplit = ref(false)
 
 const showReport = ref(false)
-const report = reactive({ correctCount: 0, wrongCount: 0, score: 0, totalScore: 0, timeUsed: 0 })
+const report = reactive({ correctCount: 0, wrongCount: 0, score: 0, totalScore: 0, timeUsed: 0, examId: null })
 
 const reviewDialogVisible = ref(false)
 const reviewingQuestion = ref({})
@@ -212,28 +200,125 @@ const formattedAnswer = computed(() => {
   return answer || '（未设置）'
 })
 
+onMounted(async () => {
+  await loadQuestionSets()
+})
+
+async function loadQuestionSets() {
+  try {
+    loading.value = true
+    const response = await getQuestionSets()
+    console.log('题集列表响应:', response)
+    
+    // 检查响应结构
+    if (Array.isArray(response)) {
+      // 直接返回数组的情况
+      sets.value = response
+    } else if (response && response.data && response.data.data) {
+      // 完整结构：{ data: { data: [...] } }
+      sets.value = response.data.data || []
+    } else if (response && response.data) {
+      // 简化结构：{ data: [...] }
+      sets.value = response.data || []
+    } else {
+      sets.value = []
+    }
+  } catch (error) {
+    console.error('加载题集列表失败:', error)
+    ElMessage.error('加载题集列表失败')
+    sets.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
 function onSelectSet() {
   loadQuestions()
 }
 
-function loadQuestions() {
-  loading.value = true
-  const set = currentSet.value
-  if (!set) {
+function normalizeQuestion(q) {
+  const converted = { ...q }
+  
+  // 转换题型
+  if (converted.type === 'choice') {
+    converted.type = 'single'
+  }
+  
+  // 转换选项格式：从对象 { A: "...", B: "..." } 转为数组 [{ key: "A", text: "..." }, ...]
+  if (converted.options && typeof converted.options === 'object' && !Array.isArray(converted.options)) {
+    converted.options = Object.entries(converted.options).map(([key, text]) => ({ key, text }))
+  }
+  
+  return converted
+}
+
+async function loadQuestions() {
+  if (!selectedSetId.value) {
     questions.value = []
-    loading.value = false
     return
   }
 
-  questions.value = set.questions.map(q => ({ ...q }))
-  Object.keys(userAnswers).forEach(k => delete userAnswers[k])
-  Object.keys(feedbackMap).forEach(k => delete feedbackMap[k])
-  Object.keys(correctMap).forEach(k => delete correctMap[k])
-  showExplanationSplit.value = false
-  showReport.value = false
-  currentIndex.value = 0
-  examStarted.value = false
-  loading.value = false
+  try {
+    loading.value = true
+    const response = await getQuestionSetDetail(selectedSetId.value)
+    console.log('题集详情响应:', response)
+    
+    // 检查响应结构
+    if (Array.isArray(response)) {
+      // 直接返回数组的情况
+      questions.value = response.map(q => normalizeQuestion(q))
+    } else if (response && response.data && response.data.data) {
+      // 完整结构：{ data: { data: { questions: [...] } } }
+      questions.value = (response.data.data.questions || []).map(q => normalizeQuestion(q))
+    } else if (response && response.data) {
+      // 简化结构：{ data: { questions: [...] } }
+      questions.value = (response.data.questions || []).map(q => normalizeQuestion(q))
+    } else if (response && response.questions) {
+      // 直接返回对象：{ questions: [...] }
+      questions.value = (response.questions || []).map(q => normalizeQuestion(q))
+    } else {
+      questions.value = []
+    }
+    
+    Object.keys(userAnswers).forEach(k => delete userAnswers[k])
+    Object.keys(feedbackMap).forEach(k => delete feedbackMap[k])
+    Object.keys(correctMap).forEach(k => delete correctMap[k])
+    showExplanationSplit.value = false
+    showReport.value = false
+    currentIndex.value = 0
+    examStarted.value = false
+    
+    await loadPracticeProgress()
+  } catch (error) {
+    console.error('加载题目失败:', error)
+    ElMessage.error('加载题目失败')
+    questions.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadPracticeProgress() {
+  if (!selectedSetId.value) return
+  
+  try {
+    const response = await getPracticeProgress(selectedSetId.value)
+    console.log('练习进度响应:', response)
+    
+    // 检查响应结构
+    if (response && response.data && response.data.data) {
+      if (response.data.data.answers) {
+        Object.assign(userAnswers, response.data.data.answers)
+      }
+    } else if (response && response.data) {
+      // 兼容直接返回数据的情况
+      if (response.data.answers) {
+        Object.assign(userAnswers, response.data.answers)
+      }
+    }
+  } catch (error) {
+    console.error('加载练习进度失败:', error)
+  }
 }
 
 function deleteSet() {
@@ -330,30 +415,85 @@ function startExam() {
   }, 1000)
 }
 
-function submitExam() {
+async function submitExam() {
   if (timer.value) {
     clearInterval(timer.value)
     timer.value = null
   }
   
-  let correct = 0
-  questions.value.forEach(q => {
-    const qid = q.id
-    computeCorrectnessFor(qid)
-    if (correctMap[qid]) correct += 1
-  })
+  if (!selectedSetId.value) {
+    ElMessage.warning('请先选择题集')
+    return
+  }
   
-  report.correctCount = correct
-  report.wrongCount = questions.value.length - correct
-  report.totalScore = questions.value.length
-  report.score = correct
-  report.timeUsed = (questions.value.length * timePerQuestion.value) - timeLeft.value
-  showReport.value = true
-  examStarted.value = false
+  try {
+    const timeUsed = (questions.value.length * timePerQuestion.value) - timeLeft.value
+    
+    const response = await submitExamApi({
+      question_set_id: selectedSetId.value,
+      answers: { ...userAnswers },
+      time_used: timeUsed
+    })
+    
+    console.log('提交考试响应:', response)
+    
+    // 检查响应结构
+    if (response && response.data && response.data.data) {
+      report.correctCount = response.data.data.correct_count
+      report.wrongCount = response.data.data.wrong_count
+      report.totalScore = response.data.data.total_score
+      report.score = response.data.data.score
+      report.timeUsed = response.data.data.time_used
+      report.examId = response.data.data.exam_id
+    } else if (response && response.data) {
+      // 兼容直接返回数据的情况
+      report.correctCount = response.data.correct_count
+      report.wrongCount = response.data.wrong_count
+      report.totalScore = response.data.total_score
+      report.score = response.data.score
+      report.timeUsed = response.data.time_used
+      report.examId = response.data.exam_id
+    }
+    
+    showReport.value = true
+    examStarted.value = false
+    
+    ElMessage.success('考试提交成功')
+  } catch (error) {
+    console.error('提交考试失败:', error)
+    ElMessage.error('提交考试失败')
+  }
 }
 
-function viewAllExplanations() {
-  ElMessage({ message: '查看全部解析功能开发中', type: 'info' })
+async function viewAllExplanations() {
+  if (!report.examId) {
+    ElMessage.warning('没有考试记录')
+    return
+  }
+  
+  try {
+    const response = await getExamReport(report.examId)
+    console.log('考试报告响应:', response)
+    
+    // 检查响应结构
+    if (response && response.data && response.data.data) {
+      if (response.data.data.correctness) {
+        Object.assign(correctMap, response.data.data.correctness)
+        showExplanationSplit.value = true
+        ElMessage.success('已加载全部解析')
+      }
+    } else if (response && response.data) {
+      // 兼容直接返回数据的情况
+      if (response.data.correctness) {
+        Object.assign(correctMap, response.data.correctness)
+        showExplanationSplit.value = true
+        ElMessage.success('已加载全部解析')
+      }
+    }
+  } catch (error) {
+    console.error('加载考试报告失败:', error)
+    ElMessage.error('加载考试报告失败')
+  }
 }
 
 function addAllWrongToMistakes() {
@@ -382,9 +522,24 @@ function addAllWrongToMistakes() {
   ElMessage({ message: `已添加 ${addedCount} 道错题到错题集`, type: 'success' })
 }
 
-function saveProgress() {
-  localStorage.setItem('practice_progress_' + (selectedSetId.value || 'none'), JSON.stringify(userAnswers))
-  ElMessage({ message: '进度已保存（本地）', type: 'success' })
+async function saveProgress() {
+  if (!selectedSetId.value) {
+    ElMessage.warning('请先选择题集')
+    return
+  }
+  
+  try {
+    const response = await savePracticeProgress({
+      question_set_id: selectedSetId.value,
+      answers: { ...userAnswers }
+    })
+    
+    console.log('保存进度响应:', response)
+    ElMessage({ message: '进度已保存', type: 'success' })
+  } catch (error) {
+    console.error('保存进度失败:', error)
+    ElMessage.error('保存进度失败')
+  }
 }
 
 function openReviewDialog() {
@@ -435,31 +590,37 @@ const formattedTime = computed(() => {
   padding: 24px;
   box-sizing: border-box;
   font-size: 16px;
+  color: #1f2d3d;
 }
 
 .page-controls {
-  display:flex;
-  gap:16px;
-  align-items:center;
-  margin-bottom:16px;
-  font-size: 20px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 18px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.2;
+  flex-wrap: wrap;
 }
 
 .page-controls .el-select {
-  font-size: 20px;
+  font-size: 16px;
   width: 60%;
+  min-width: 240px;
 }
 
 .page-controls .el-button,
 .page-controls .el-input-number {
-  font-size: 20px;
-  margin-top: 2px;
+  font-size: 15px;
+  margin-top: 0;
 }
 
 .page-controls .el-radio-group {
-  transform: scale(1.45);
-  margin-left: 20px;
-  padding: 15px;
+  transform: scale(1.08);
+  margin-left: 4px;
+  padding: 4px;
+  transform-origin: left center;
 }
 
 .page-body { display:flex; gap:20px; position: relative; }
@@ -473,15 +634,31 @@ const formattedTime = computed(() => {
 }
 
 .control-row {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:16px;
-  font-size: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #dde8f7;
+  border-radius: 12px;
+  padding: 10px 14px;
+  backdrop-filter: blur(2px);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.control-row strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a73e8;
 }
 
 .control-row .el-button {
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .question-container {
@@ -533,6 +710,54 @@ const formattedTime = computed(() => {
   padding: 24px;
 }
 
+.single-view :deep(.question-card),
+.single-view :deep(.question-container),
+.split-left :deep(.question-card),
+.split-left :deep(.question-container) {
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.single-view :deep(h1),
+.single-view :deep(h2),
+.single-view :deep(h3),
+.split-left :deep(h1),
+.split-left :deep(h2),
+.split-left :deep(h3) {
+  font-size: clamp(18px, 2vw, 24px);
+  line-height: 1.35;
+  font-weight: 700;
+  color: #102a43;
+}
+
+.single-view :deep(.question-stem),
+.split-left :deep(.question-stem),
+.single-view :deep(.stem),
+.split-left :deep(.stem) {
+  font-size: clamp(18px, 1.9vw, 24px);
+  line-height: 1.55;
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.single-view :deep(.option-item),
+.split-left :deep(.option-item),
+.single-view :deep(.option),
+.split-left :deep(.option) {
+  font-size: clamp(16px, 1.5vw, 20px);
+  line-height: 1.6;
+  font-weight: 500;
+}
+
+.single-view :deep(.answer-section),
+.split-left :deep(.answer-section),
+.single-view :deep(.analysis-section),
+.split-left :deep(.analysis-section),
+.single-view :deep(.explanation-section),
+.split-left :deep(.explanation-section) {
+  font-size: 15px;
+}
+
 .explanation-card {
   height: 100%;
   background: transparent;
@@ -541,10 +766,11 @@ const formattedTime = computed(() => {
 }
 
 .explanation-card h3 {
-  font-size: 16px;
+  font-size: 17px;
+  font-weight: 700;
   color: var(--color-primary);
-  margin-bottom: 8px;
-  margin-top: 12px;
+  margin-bottom: 10px;
+  margin-top: 14px;
 }
 
 .explanation-card h3:first-child {
@@ -552,25 +778,26 @@ const formattedTime = computed(() => {
 }
 
 .correct-answer {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--color-success);
-  font-weight: 600;
-  margin-bottom: 8px;
-  padding: 8px 12px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  padding: 10px 14px;
   background: linear-gradient(135deg, #f0f9eb 0%, #e8f5e9 100%);
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid #c8e6c9;
+  line-height: 1.55;
 }
 
 .explanation-text,
 .knowledge-points {
-  font-size: 14px;
+  font-size: 15px;
   color: #333;
-  line-height: 1.5;
-  margin-bottom: 8px;
-  padding: 8px 12px;
+  line-height: 1.75;
+  margin-bottom: 10px;
+  padding: 10px 14px;
   background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid #e0e0e0;
 }
 
@@ -589,23 +816,34 @@ const formattedTime = computed(() => {
 }
 
 .question-actions-fixed .el-button {
-  font-size: 14px;
-  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 9px 18px;
   height: auto;
+  transition: transform 0.18s ease, box-shadow 0.2s ease;
+}
+
+.question-actions-fixed .el-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(26, 115, 232, 0.16);
 }
 
 .report {
-  margin-top:16px;
+  margin-top: 16px;
   font-size: 16px;
 }
 
 .report h3 {
-  font-size: 18px;
-  margin-bottom: 12px;
+  font-size: 22px;
+  margin-bottom: 14px;
+  font-weight: 700;
+  color: #0f172a;
 }
 
 .report p {
   font-size: 16px;
+  line-height: 1.75;
+  font-weight: 500;
   margin-bottom: 8px;
 }
 
@@ -627,11 +865,50 @@ const formattedTime = computed(() => {
 
 :deep(.el-empty__description) {
   font-size: 16px;
+  font-weight: 500;
+  color: #667085;
+}
+
+:deep(.el-input__inner),
+:deep(.el-textarea__inner),
+:deep(.el-select__input),
+:deep(.el-radio-button__inner),
+:deep(.el-input-number__decrease),
+:deep(.el-input-number__increase) {
+  font-size: 15px;
+}
+
+:deep(.el-button) {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+:deep(.el-button:focus-visible) {
+  outline: 2px solid rgba(64, 158, 255, 0.35);
+  outline-offset: 2px;
+}
+
+:deep(.el-radio-button__inner) {
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 @media (max-width: 992px) {
-  .page-body { flex-direction:column }
-  .navigator { width:100% }
-  .split-view { flex-direction:column }
+  .page-body { flex-direction: column }
+  .navigator { width: 100% }
+  .split-view { flex-direction: column }
+  .page-controls {
+    font-size: 15px;
+    gap: 10px;
+  }
+  .page-controls .el-select {
+    width: 100%;
+  }
+  .single-view :deep(.question-stem),
+  .split-left :deep(.question-stem),
+  .single-view :deep(.stem),
+  .split-left :deep(.stem) {
+    font-size: 18px;
+  }
 }
 </style>

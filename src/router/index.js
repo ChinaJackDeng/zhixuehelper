@@ -74,6 +74,7 @@ const routes = [
         path:'/exam',
         name: 'Exam',
         component:()=>import('@/views/exam/QuestionGenerator.vue'),
+        alias: ['/question-bank/generate'],
         meta: {
             title:'题目生成 - 智学助手',
             requiresAuth: true

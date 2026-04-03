@@ -11,6 +11,13 @@
               label-position="top"
               class="config-form"
           >
+            <div class="config-quick-stats">
+              <el-tag effect="plain" type="info">已选标签 {{ configForm.tags.length }}</el-tag>
+              <el-tag effect="plain" type="success">已选文件 {{ configForm.selectedFiles.length }}</el-tag>
+              <el-tag effect="plain" type="warning">计划题数 {{ totalQuestionCount }}</el-tag>
+            </div>
+
+            <div class="config-form-content">
             <!-- 1. 标签检索 -->
             <el-form-item
                 prop="tags"
@@ -69,6 +76,13 @@
                 prop="selectedFiles"
                 :rules="{ required: true, message: '请至少选择一个文件', trigger: 'change' }"
             >
+              <div class="file-toolbar" v-if="!loadingFiles && filteredFiles.length > 0">
+                <span class="file-toolbar-text">共 {{ filteredFiles.length }} 个可选文件</span>
+                <div class="file-toolbar-actions">
+                  <el-button link size="small" @click="selectAllFilteredFiles">全选当前</el-button>
+                  <el-button link size="small" @click="clearSelectedFiles">清空文件</el-button>
+                </div>
+              </div>
               <div v-if="loadingFiles" class="loading-container">
                 <el-icon class="loading-icon"><Loading /></el-icon>
                 <span>加载文件中...</span>
@@ -170,6 +184,7 @@
                 </el-col>
               </el-row>
             </el-form-item>
+            </div>
 
             <!-- 生成按钮 -->
             <div class="form-actions">
@@ -209,7 +224,7 @@
               </span>
             </h3>
             <div class="preview-actions">
-              <el-button :icon="Refresh" @click="regenerate">重新生成</el-button>
+              <el-button :icon="Refresh" @click="regenerate" :disabled="generating || !canGenerate">重新生成</el-button>
               <el-button type="success" :icon="Check" @click="saveQuestions" :disabled="generatedQuestions.length === 0">
                 保存题目
               </el-button>
@@ -217,13 +232,13 @@
           </div>
 
           <!-- 题目卡片 -->
-          <div class="question-card-container">
+          <div class="question-card-container" :class="{ 'is-generating': generating }">
             <!-- 加载动画 -->
             <div v-if="generating" class="loading-animation">
               <div class="loading-spinner"></div>
               <div class="loading-text">
                 <div class="loading-title">正在生成题目</div>
-                <div class="loading-subtitle">{{ currentStep || 'AI 正在分析文档并创建题目...' }}</div>
+                <div class="loading-subtitle">{{ localizedCurrentStep }}</div>
                 <div class="loading-progress">
                   <div class="progress-bar">
                     <div class="progress-fill" :style="{ width: generationProgress + '%' }"></div>
@@ -323,15 +338,23 @@
             <!-- 题号导航 -->
             <div class="question-indexes">
               <el-scrollbar>
-                <button
-                    v-for="(q, idx) in generatedQuestions"
-                    :key="q.id"
-                    class="index-button"
-                    :class="{ active: idx === currentQuestionIndex }"
-                    @click="goToQuestion(idx)"
-                >
-                  {{ idx + 1 }}
-                </button>
+                <div class="question-index-columns">
+                  <div
+                      v-for="(column, columnIndex) in questionIndexColumns"
+                      :key="`col-${columnIndex}`"
+                      class="question-index-column"
+                  >
+                    <button
+                        v-for="item in column"
+                        :key="item.id"
+                        class="index-button"
+                        :class="{ active: item.index === currentQuestionIndex }"
+                        @click="goToQuestion(item.index)"
+                    >
+                      {{ item.index + 1 }}
+                    </button>
+                  </div>
+                </div>
               </el-scrollbar>
             </div>
           </div>
@@ -342,8 +365,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter, useRoute } from 'vue-router'
 import {
   MagicStick, Refresh, Check, ArrowLeft, ArrowRight, Loading, Close
 } from '@element-plus/icons-vue'
@@ -351,13 +375,22 @@ import { Minus, Plus } from '@element-plus/icons-vue'
 import {
   getTagList,
   getDocumentList,
-  searchDocumentsByTags
+  searchDocumentsByTags,
+  getDocumentDetail
 } from '@/api/knowledge'
 import {
   generateQuestions as apiGenerateQuestions,
   getGenerationProgress,
+  getQuestionPreview,
+  cancelGeneration,
   saveQuestions as apiSaveQuestions
 } from '@/api/exam'
+
+// 路由相关
+const router = useRouter()
+const route = useRoute()
+let removeRouteGuard = null
+
 // 表单数据
 const configFormRef = ref(null)
 const generating = ref(false)
@@ -366,6 +399,7 @@ const showExplanation = ref(false)
 const currentQuestionIndex = ref(0)
 const pollTimer = ref(null) // 轮询定时器 ID
 const shouldStopPolling = ref(false) // 是否应该停止轮询
+const currentTaskId = ref('')
 
 // 加载状态
 const loadingTags = ref(false)
@@ -417,9 +451,57 @@ const currentQuestion = computed(() => {
   return generatedQuestions.value[currentQuestionIndex.value] || {}
 })
 
+const selectedTypeCounts = computed(() => {
+  return configForm.questionTypes.reduce((acc, type) => {
+    acc[type] = typeCounts[type] || 1
+    return acc
+  }, {})
+})
+
+const totalQuestionCount = computed(() => {
+  return Object.values(selectedTypeCounts.value).reduce((sum, count) => sum + count, 0)
+})
+
+const localizedCurrentStep = computed(() => {
+  const step = (currentStep.value || '').trim()
+  if (!step) return 'AI 正在分析文档并创建题目...'
+  const typeMap = {
+    single: '单选题',
+    multi: '多选题',
+    judge: '判断题',
+    fill: '填空题',
+    essay: '简答题',
+    short_answer: '简答题',
+    choice: '单选题'
+  }
+  let localized = step
+  Object.entries(typeMap).forEach(([key, label]) => {
+    localized = localized.replace(new RegExp(`\\b${key}\\b`, 'gi'), label)
+  })
+  localized = localized.replace(/正在生成\s*([^\s（(]+)\s*[（(]\s*([^)）]+)\s*[)）]/, '正在生成$1 $2')
+  return localized
+})
+
+const questionIndexColumns = computed(() => {
+  const columns = []
+  const columnSize = 5
+  generatedQuestions.value.forEach((q, idx) => {
+    const columnIndex = Math.floor(idx / columnSize)
+    if (!columns[columnIndex]) {
+      columns[columnIndex] = []
+    }
+    columns[columnIndex].push({
+      id: q.id ?? `question-${idx}`,
+      index: idx
+    })
+  })
+  return columns
+})
+
 const canGenerate = computed(() => {
   return configForm.selectedFiles.length > 0 && 
-         configForm.questionTypes.length > 0
+         configForm.questionTypes.length > 0 &&
+         totalQuestionCount.value > 0
 })
 
 // 加载标签列表
@@ -475,10 +557,101 @@ const loadFiles = async (tagIds = []) => {
   }
 }
 
+const removeFileExtension = (filename = '') => {
+  return filename.replace(/\.[^./\\]+$/, '')
+}
+
+const formatTimestamp = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  const second = String(date.getSeconds()).padStart(2, '0')
+  return `${year}${month}${day}${hour}${minute}${second}`
+}
+
+const initializeFromRoute = async () => {
+  const rawDocId = route.query.docId
+  if (!rawDocId) return
+  const docId = Number(rawDocId)
+  if (!Number.isFinite(docId) || docId <= 0) return
+  const docTitle = typeof route.query.docTitle === 'string' ? route.query.docTitle : ''
+  
+  configForm.bindType = 'by_file'
+  configForm.tags = []
+  configForm.selectedFiles = [docId]
+  if (!configForm.questionSetName && docTitle) {
+    const baseName = removeFileExtension(docTitle).trim() || `文档${docId}`
+    configForm.questionSetName = `${baseName}_题目集_${formatTimestamp()}`
+  }
+  
+  const existsInList = allFiles.value.some(file => Number(file.id) === docId)
+  if (!existsInList) {
+    try {
+      const response = await getDocumentDetail(docId)
+      const detail = response.data || response
+      if (detail && detail.id) {
+        allFiles.value = [{
+          id: detail.id,
+          title: detail.title || docTitle || `文档 ${docId}`,
+          name: detail.title || docTitle || `文档 ${docId}`,
+          file_size: detail.file_size || detail.size || 0,
+          size: detail.size || detail.file_size || 0,
+          tags: detail.tags || []
+        }, ...allFiles.value]
+      }
+    } catch (error) {
+      console.warn('根据路由参数加载文档详情失败:', error)
+    }
+  }
+  
+  ElMessage.success('已选中来源文档，请配置参数后点击开始生成')
+}
+
 // 组件挂载时加载数据
 onMounted(async () => {
   await loadTags()
   await loadFiles()
+  await initializeFromRoute()
+  
+  // 添加路由守卫
+  removeRouteGuard = router.beforeEach((to, from, next) => {
+    if (generating.value) {
+      ElMessageBox.confirm(
+        '题目正在生成中，确定要离开吗？离开后生成过程将继续，但您无法在这里查看进度。',
+        '确认离开',
+        {
+          confirmButtonText: '确定离开',
+          cancelButtonText: '继续等待',
+          type: 'warning'
+        }
+      ).then(() => {
+        // 清除轮询
+        if (pollTimer.value) {
+          clearTimeout(pollTimer.value)
+          pollTimer.value = null
+        }
+        shouldStopPolling.value = true
+        next()
+      }).catch(() => {
+        next(false)
+      })
+    } else {
+      next()
+    }
+  })
+})
+
+onUnmounted(() => {
+  // 移除路由守卫
+  if (removeRouteGuard) {
+    removeRouteGuard()
+  }
+  // 清除轮询
+  if (pollTimer.value) {
+    clearTimeout(pollTimer.value)
+  }
 })
 
 // 工具方法
@@ -536,9 +709,25 @@ const decreaseCount = (type) => {
 }
 
 
+const normalizeDifficulty = (difficulty) => {
+  const raw = String(difficulty ?? '').trim().toLowerCase()
+  const map = {
+    easy: 'easy',
+    medium: 'medium',
+    hard: 'hard',
+    mixed: 'mixed',
+    简单: 'easy',
+    中等: 'medium',
+    困难: 'hard',
+    混合: 'mixed'
+  }
+  return map[raw] || ''
+}
+
 const getDifficultyLabel = (difficulty) => {
+  const normalized = normalizeDifficulty(difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
   const map = { easy: '简单', medium: '中等', hard: '困难', mixed: '混合' }
-  return map[difficulty] || difficulty
+  return map[normalized] || '中等'
 }
 
 const formatAnswer = (answer, type) => {
@@ -566,34 +755,39 @@ const clearAllTags = async () => {
   await loadFiles([])
 }
 
+const selectAllFilteredFiles = () => {
+  configForm.selectedFiles = filteredFiles.value.map(file => file.id)
+}
+
+const clearSelectedFiles = () => {
+  configForm.selectedFiles = []
+}
+
 const generateQuestions = async () => {
   if (!canGenerate.value) {
     ElMessage.warning('请完善生成参数')
     return
   }
 
+  shouldStopPolling.value = false
+  currentTaskId.value = ''
   generating.value = true
   generationProgress.value = 0
   currentStep.value = '准备生成题目...'
   
   try {
-    // 计算总题目数
-    const totalQuestions = configForm.questionTypes.reduce((sum, type) => {
-      return sum + (typeCounts[type] || 0)
-    }, 0)
-
     // 调用 API 生成题目
     const response = await apiGenerateQuestions({
       question_types: configForm.questionTypes,
       document_ids: configForm.selectedFiles,
       tags: configForm.tags,
       difficulty: configForm.difficulty,
-      question_count: totalQuestions,
+      question_count: totalQuestionCount.value,
       include_answers: true,
       include_analysis: true,
       question_set_name: configForm.questionSetName,
       bind_type: configForm.bindType,
-      type_counts: typeCounts
+      type_counts: selectedTypeCounts.value
     })
 
     console.log('生成题目响应:', response)
@@ -607,7 +801,8 @@ const generateQuestions = async () => {
           ...q,
           type: q.type === 'choice' ? 'single' : q.type,
           stem: q.content,  // 将 content 映射为 stem
-          options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : []
+          options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : [],
+          difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
         }
       })
       
@@ -623,6 +818,16 @@ const generateQuestions = async () => {
       ElMessage.success(`成功生成 ${convertedQuestions.length} 道题目`)
     } else if (response.task_id) {
       // 如果是异步任务，轮询查询进度（直到获取到题目）
+      currentTaskId.value = response.task_id
+      if (shouldStopPolling.value) {
+        await cancelGeneration(response.task_id)
+        generating.value = false
+        generationProgress.value = 0
+        currentStep.value = ''
+        currentTaskId.value = ''
+        ElMessage.info('已停止生成题目')
+        return
+      }
       currentStep.value = '题目生成中...'
       await pollGenerationProgress(response.task_id)
       // pollGenerationProgress 内部会在获取到题目后关闭加载动画
@@ -631,6 +836,7 @@ const generateQuestions = async () => {
       generating.value = false
       generationProgress.value = 0
       currentStep.value = ''
+      currentTaskId.value = ''
     }
 
   } catch (error) {
@@ -639,13 +845,14 @@ const generateQuestions = async () => {
     generating.value = false
     generationProgress.value = 0
     currentStep.value = ''
+    currentTaskId.value = ''
   }
 }
 
 // 轮询生成进度
 const pollGenerationProgress = async (taskId) => {
-  const maxAttempts = 30 // 最多轮询 30 次
-  const interval = 2000 // 每 2 秒查询一次
+  const maxAttempts = 300 // 最多轮询 300 次
+  const interval = 6000 // 每 6 秒查询一次
   let attempts = 0
 
   // 初始进度
@@ -673,6 +880,63 @@ const pollGenerationProgress = async (taskId) => {
         currentStep.value = progress.current_step
       }
 
+      // 处理 ready 状态：题目已生成，等待用户确认
+      if (progress.status === 'ready') {
+        console.log('题目生成完成，状态为 ready，调用预览接口获取题目')
+        
+        // 设置进度为 100%
+        generationProgress.value = 100
+        currentStep.value = '题目生成完成，等待用户确认'
+        
+        try {
+          // 调用预览接口获取所有题目
+          const previewResult = await getQuestionPreview(taskId, { page: 1, page_size: 50 })
+          console.log('预览接口返回结果:', previewResult)
+          
+          if (previewResult.data && previewResult.data.length > 0) {
+            // 转换题型和字段：后端返回 choice -> 前端使用 single, content -> stem
+            const convertedQuestions = previewResult.data.map(q => {
+              console.log('原始题目数据 (预览):', q)
+              return {
+                ...q,
+                type: q.type === 'choice' ? 'single' : q.type,
+                stem: q.stem,  // 将 content 映射为 stem
+                options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : [],
+                explanation: q.explanation,  // analysis -> explanation
+                difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
+              }
+            })
+            
+            console.log('转换后的题目数据 (预览):', convertedQuestions)
+            generatedQuestions.value = convertedQuestions
+            currentQuestionIndex.value = 0
+            showAnswer.value = false
+            showExplanation.value = false
+            
+            // 关闭加载动画，但保持题目数据供用户预览和保存
+            generating.value = false
+            generationProgress.value = 0
+            currentStep.value = ''
+            currentTaskId.value = ''
+            ElMessage.success(`成功生成 ${convertedQuestions.length} 道题目，请预览并确认保存`)
+          } else {
+            ElMessage.warning('题目生成完成，但未获取到题目数据')
+            generating.value = false
+            generationProgress.value = 0
+            currentStep.value = ''
+            currentTaskId.value = ''
+          }
+        } catch (error) {
+          console.error('获取题目预览失败:', error)
+          ElMessage.error('获取题目预览失败，请稍后重试')
+          generating.value = false
+          generationProgress.value = 0
+          currentStep.value = ''
+          currentTaskId.value = ''
+        }
+        return
+      }
+
       if (progress.status === 'completed' && progress.questions) {
         // 设置进度为 100%
         generationProgress.value = 100
@@ -688,7 +952,8 @@ const pollGenerationProgress = async (taskId) => {
             ...q,
             type: q.type === 'choice' ? 'single' : q.type,
             stem: q.content,  // 将 content 映射为 stem
-            options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : []
+            options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : [],
+            difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
           }
         })
         
@@ -701,7 +966,17 @@ const pollGenerationProgress = async (taskId) => {
         generating.value = false
         generationProgress.value = 0
         currentStep.value = ''
+        currentTaskId.value = ''
         ElMessage.success(`成功生成 ${convertedQuestions.length} 道题目`)
+        return
+      }
+
+      if (progress.status === 'cancelled') {
+        generating.value = false
+        generationProgress.value = 0
+        currentStep.value = ''
+        currentTaskId.value = ''
+        ElMessage.info('题目生成已停止')
         return
       }
 
@@ -710,6 +985,7 @@ const pollGenerationProgress = async (taskId) => {
         generating.value = false
         generationProgress.value = 0
         currentStep.value = ''
+        currentTaskId.value = ''
         return
       }
 
@@ -719,6 +995,7 @@ const pollGenerationProgress = async (taskId) => {
         generating.value = false
         generationProgress.value = 0
         currentStep.value = ''
+        currentTaskId.value = ''
         return
       }
 
@@ -731,6 +1008,7 @@ const pollGenerationProgress = async (taskId) => {
       generating.value = false
       generationProgress.value = 0
       currentStep.value = ''
+      currentTaskId.value = ''
     }
   }
 
@@ -739,7 +1017,7 @@ const pollGenerationProgress = async (taskId) => {
 }
 
 // 停止生成
-const stopGeneration = () => {
+const stopGeneration = async () => {
   // 设置停止标志
   shouldStopPolling.value = true
   
@@ -749,10 +1027,19 @@ const stopGeneration = () => {
     pollTimer.value = null
   }
   
-  generating.value = false
-  generationProgress.value = 0
-  currentStep.value = ''
-  ElMessage.info('已停止生成题目')
+  try {
+    if (currentTaskId.value) {
+      await cancelGeneration(currentTaskId.value)
+    }
+    generating.value = false
+    generationProgress.value = 0
+    currentStep.value = ''
+    currentTaskId.value = ''
+    ElMessage.info('已停止生成题目')
+  } catch (error) {
+    console.error('停止生成失败:', error)
+    ElMessage.error(error.response?.data?.detail || '停止生成失败，请稍后重试')
+  }
 }
 
 const resetConfig = () => {
@@ -817,7 +1104,12 @@ const saveQuestions = async () => {
     })
 
     // 调用 API 保存题目
-    const response = await apiSaveQuestions(formattedQuestions, 'append')
+    const response = await apiSaveQuestions({
+      questions: formattedQuestions,
+      save_mode: 'append',
+      question_set_name: configForm.questionSetName || undefined,
+      document_ids: configForm.selectedFiles.map(id => Number(id))
+    })
     
     console.log('保存题目响应:', response)
     
@@ -889,12 +1181,34 @@ const goToQuestion = (index) => {
   box-shadow: 0 4px 20px rgba(26, 115, 232, 0.08);
 }
 
+.config-card :deep(.el-card__body),
+.preview-card :deep(.el-card__body) {
+  height: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .config-form {
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 8px;
+  padding: 12px 16px;
 }
+
+.config-quick-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.config-form-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
 /* 修复文件选择框的CSS */
 .file-checkbox-group {
   max-height: 300px;
@@ -916,6 +1230,24 @@ const goToQuestion = (index) => {
   background: #fafafa;
   color: #666;
   font-size: 14px;
+}
+
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.file-toolbar-text {
+  font-size: 13px;
+  color: #606266;
+}
+
+.file-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .loading-icon {
@@ -1155,9 +1487,10 @@ const goToQuestion = (index) => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding: 20px 0 8px 0;
+  padding: 14px 0 4px;
   border-top: 1px solid #eee;
-  margin-top: auto;
+  margin-top: 12px;
+  background: #fff;
 }
 
 /* 标签表单项目 */
@@ -1311,7 +1644,7 @@ const goToQuestion = (index) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid #eee;
 }
 
@@ -1336,18 +1669,29 @@ const goToQuestion = (index) => {
 .question-card-container {
   flex: 1;
   display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 16px 20px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.question-card-container.is-generating {
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  min-height: 300px;
+  padding: 20px;
 }
 
 .question-card {
   width: 100%;
   background: #f8f9fa;
   border-radius: 12px;
-  padding: 20px;
+  padding: 18px 20px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .question-header {
@@ -1372,6 +1716,10 @@ const goToQuestion = (index) => {
 
 .question-content {
   line-height: 1.6;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .question-stem {
@@ -1438,9 +1786,13 @@ const goToQuestion = (index) => {
 }
 
 .question-navigation {
-  padding: 16px;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #fff;
+  padding: 12px 16px;
   border-top: 1px solid #eee;
-  margin-top: 16px;
+  margin-top: 0;
 }
 
 .nav-buttons {
@@ -1450,15 +1802,27 @@ const goToQuestion = (index) => {
 }
 
 .question-indexes {
-  max-height: 400px;
-  overflow-y: auto;
+  max-height: 240px;
+  overflow: hidden;
 }
 
 .question-indexes :deep(.el-scrollbar__wrap) {
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 8px;
+  overflow-x: auto;
+  overflow-y: auto;
   padding-bottom: 10px;
+}
+
+.question-index-columns {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: max-content;
+}
+
+.question-index-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .index-button {
@@ -1492,6 +1856,12 @@ const goToQuestion = (index) => {
     flex-direction: column;
     height: auto;
   }
+
+  .question-generator-page {
+    margin-left: 0;
+    margin-right: 0;
+    padding: 16px;
+  }
   
   .config-section,
   .preview-section {
@@ -1511,9 +1881,15 @@ const goToQuestion = (index) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 400px;
-  padding: 40px;
+  width: 100%;
+  max-width: 560px;
+  min-height: 320px;
+  padding: 36px 32px;
   text-align: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff 0%, #f7fbff 100%);
+  border: 1px solid #e3efff;
+  box-shadow: 0 8px 24px rgba(26, 115, 232, 0.12);
 }
 
 .loading-spinner {
@@ -1532,17 +1908,18 @@ const goToQuestion = (index) => {
 }
 
 .loading-title {
-  font-size: 18px;
+  font-size: 26px;
   font-weight: 600;
   color: #333;
   margin-bottom: 8px;
 }
 
 .loading-subtitle {
-  font-size: 14px;
+  font-size: 16px;
   color: #666;
   margin-bottom: 24px;
   line-height: 1.4;
+  line-height: 1.6;
 }
 
 .loading-progress {

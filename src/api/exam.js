@@ -6,27 +6,41 @@ import service from '@/api/request'
 /**
  * 生成题目
  * @param {Object} data - 请求数据
- * @param {Array} data.question_types - 题型列表（choice, fill, judge, short_answer）
+ * @param {Array} data.question_types - 题型列表（single, multi, fill, judge, essay）
  * @param {Array} data.document_ids - 文档 ID 列表（必需）
  * @param {Array} data.tags - 标签 ID 列表（可选）
- * @param {string} data.difficulty - 难度（easy, medium, hard），默认 medium
- * @param {number} data.question_count - 题目数量（1-50），默认 10
+ * @param {string} data.difficulty - 难度（easy, medium, hard, mixed），默认 mixed
+ * @param {number} data.question_count - 题目数量（1-100），默认 10
  * @param {boolean} data.include_answers - 是否包含答案，默认 true
  * @param {boolean} data.include_analysis - 是否包含解析，默认 true
+ * @param {string} data.question_set_name - 题集名称（可选）
+ * @param {Object} data.type_counts - 每种题型的数量（可选），如 {single: 5, multi: 3}
  */
 export function generateQuestions(data) {
+  console.log('===== apiGenerateQuestions 被调用 =====')
+  console.log('传入的 data 参数:', data)
+  console.log('data.type_counts:', data.type_counts)
+  
+  const requestData = {
+    question_types: data.question_types,
+    document_ids: data.document_ids,
+    tags: data.tags || [],
+    difficulty: data.difficulty || 'mixed',
+    question_count: data.question_count || 10,
+    include_answers: data.include_answers !== false,
+    include_analysis: data.include_analysis !== false,
+    question_set_name: data.question_set_name || '',
+    type_counts: data.type_counts || undefined
+  }
+  
+  console.log('实际发送给后端的数据:', requestData)
+  console.log('发送的 type_counts:', requestData.type_counts)
+  console.log('===================================')
+  
   return service({
     url: '/exam/questions/generate',
     method: 'post',
-    data: {
-      question_types: data.question_types,
-      document_ids: data.document_ids,
-      tags: data.tags || [],
-      difficulty: data.difficulty || 'medium',
-      question_count: data.question_count || 10,
-      include_answers: data.include_answers !== false,
-      include_analysis: data.include_analysis !== false
-    }
+    data: requestData
   })
 }
 
@@ -42,6 +56,152 @@ export function getGenerationProgress(taskId) {
 }
 
 /**
+ * 分页获取任务生成的题目列表
+ * @param {string} taskId - 任务 ID
+ * @param {Object} params - 查询参数
+ * @param {number} params.page - 页码，从 1 开始（默认 1）
+ * @param {number} params.page_size - 每页数量，最大 50（默认 10）
+ */
+export function getTaskQuestions(taskId, params = {}) {
+  return service({
+    url: `/exam/questions/task/${taskId}`,
+    method: 'get',
+    params: {
+      page: params.page || 1,
+      page_size: params.page_size || 10
+    }
+  })
+}
+
+/**
+ * 预览临时生成的题目（从 Redis 读取）
+ * @param {string} taskId - 任务 ID
+ * @param {Object} params - 查询参数
+ * @param {number} params.page - 页码，从 1 开始（默认 1）
+ * @param {number} params.page_size - 每页数量，最大 50（默认 10）
+ * 
+ * 说明：
+ * - 用于题目生成完成后、保存前的预览阶段
+ * - 生成状态为 "ready" 时调用此接口
+ * - 返回 Redis 中的临时题目，不包括已保存的数据库题目
+ * - 用户确认后调用 confirmSaveQuestions() 保存到数据库
+ */
+export function getQuestionPreview(taskId, params = {}) {
+  return service({
+    url: `/exam/questions/preview/${taskId}`,
+    method: 'get',
+    params: {
+      page: params.page || 1,
+      page_size: params.page_size || 10
+    }
+  })
+}
+
+/**
+ * 确认保存题目
+ * @param {string} taskId - 任务 ID（路径参数）
+ */
+export function confirmSaveQuestions(taskId) {
+  return service({
+    url: `/exam/questions/confirm/${taskId}`,
+    method: 'post'
+  })
+}
+
+/**
+ * 取消题目生成任务
+ * @param {string} taskId - 任务 ID（路径参数）
+ */
+export function cancelGeneration(taskId) {
+  return service({
+    url: `/exam/questions/cancel/${taskId}`,
+    method: 'post'
+  })
+}
+
+// ==================== 练习和考试相关接口 ====================
+
+/**
+ * 获取题集列表
+ * @returns {Promise} 返回题集列表，每项包含 id, name, question_count, created_at
+ */
+export function getQuestionSets() {
+  return service({
+    url: '/exam/question-sets',
+    method: 'get'
+  })
+}
+
+/**
+ * 获取题集详情
+ * @param {number} questionSetId - 题集 ID
+ * @returns {Promise} 返回题集详情及包含的题目
+ */
+export function getQuestionSetDetail(questionSetId) {
+  return service({
+    url: `/exam/question-sets/${questionSetId}`,
+    method: 'get'
+  })
+}
+
+/**
+ * 保存练习进度
+ * @param {Object} data - 请求数据
+ * @param {number} data.question_set_id - 题集 ID
+ * @param {Object} data.answers - 答案对象，key 为题目 ID，value 为答案
+ * @returns {Promise} 后端会合并增量答案，不会覆盖整个历史
+ */
+export function savePracticeProgress(data) {
+  return service({
+    url: '/exam/practice-progress',
+    method: 'post',
+    data: data
+  })
+}
+
+/**
+ * 恢复练习进度
+ * @param {number} questionSetId - 题集 ID
+ * @returns {Promise} 返回 data.answers + data.updated_at，没进度会返回空 answers
+ */
+export function getPracticeProgress(questionSetId) {
+  return service({
+    url: `/exam/practice-progress/${questionSetId}`,
+    method: 'get'
+  })
+}
+
+/**
+ * 提交考试
+ * @param {Object} data - 请求数据
+ * @param {number} data.question_set_id - 题集 ID
+ * @param {Object} data.answers - 答案对象
+ * @param {number} data.time_used - 用时（秒）
+ * @returns {Promise} 返回 exam_id, correct_count, wrong_count, score, total_score, time_used
+ */
+export function submitExam(data) {
+  return service({
+    url: '/exam/exams',
+    method: 'post',
+    data: data
+  })
+}
+
+/**
+ * 获取考试报告
+ * @param {number} examId - 考试 ID
+ * @returns {Promise} 返回 exam_id, question_set_id, correct_count, wrong_count, score, total_score, time_used, answers, correctness, created_at
+ */
+export function getExamReport(examId) {
+  return service({
+    url: `/exam/exams/${examId}`,
+    method: 'get'
+  })
+}
+
+// ==================== 题目管理相关接口 ====================
+
+/**
  * 获取题目详情
  * @param {number} questionId - 题目 ID
  */
@@ -54,17 +214,29 @@ export function getQuestionDetail(questionId) {
 
 /**
  * 保存题目到题库
- * @param {Array} questions - 题目列表
- * @param {string} saveMode - 保存模式（append, replace），默认 append
+ * @param {Object} data - 请求数据
+ * @param {Array} data.questions - 题目列表
+ * @param {string} data.save_mode - 保存模式：append（追加）或 replace（替换）
+ * @param {string} data.question_set_name - 题目集名称（可选）
+ * @param {Array} data.document_ids - 关联文档 ID 列表（可选）
  */
-export function saveQuestions(questions, saveMode = 'append') {
+export function saveQuestions(data, legacySaveMode) {
+  const payload = Array.isArray(data)
+    ? {
+        questions: data,
+        save_mode: legacySaveMode || 'append'
+      }
+    : {
+        questions: data?.questions || [],
+        save_mode: data?.save_mode || 'append',
+        question_set_name: data?.question_set_name,
+        document_ids: data?.document_ids
+      }
+
   return service({
     url: '/exam/questions/save',
     method: 'post',
-    data: {
-      questions: questions,
-      save_mode: saveMode
-    }
+    data: payload
   })
 }
 
