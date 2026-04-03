@@ -1,982 +1,834 @@
-<!-- src/views/analytics/AnalyticsPage.vue -->
 <template>
   <div class="learning-dashboard">
-    <div class="dashboard-header">
-      <div class="header-content">
-        <div class="header-right">
-          <el-radio-group v-model="currentWeek" size="large">
-            <el-radio-button label="current">本周</el-radio-button>
-            <el-radio-button label="last">上周</el-radio-button>
-            <el-radio-button label="custom">自定义</el-radio-button>
-          </el-radio-group>
-        </div>
+    <div class="dashboard-header card-base">
+      <div class="header-left">
+        <h1 class="dashboard-title">学习分析看板</h1>
+        <p class="dashboard-subtitle">通过趋势、结构与薄弱点诊断，持续追踪学习质量并生成周期性学习报告</p>
+      </div>
+      <div class="header-right">
+        <el-radio-group v-model="currentWeek" size="default">
+          <el-radio-button label="current">本周</el-radio-button>
+          <el-radio-button label="last">上周</el-radio-button>
+          <el-radio-button label="custom">近30天</el-radio-button>
+        </el-radio-group>
+        <el-select v-model="reportCycle" class="cycle-select" size="default">
+          <el-option label="周报" value="weekly" />
+          <el-option label="月报" value="monthly" />
+        </el-select>
+        <el-button type="primary" @click="regenerateReport">生成报告</el-button>
       </div>
     </div>
 
-    <!-- 主内容区：左右布局 -->
-    <div class="main-content-wrapper">
-      <!-- 左侧内容区 -->
-      <div class="left-content">
-        <!-- 核心学习概览：4个KPI卡片 -->
-        <div class="overview-section">
-          <div class="stats-grid">
-            <div class="stat-card" v-for="(stat, index) in overviewStats" :key="index">
-              <div class="stat-header">
-                <span class="stat-title">{{ stat.title }}</span>
-              </div>
-              <div class="stat-value">{{ stat.value }}</div>
-              <div class="stat-trend" :class="stat.trend > 0 ? 'up' : 'down'">
-                <el-tag :type="stat.trend > 0 ? 'success' : 'danger'" size="small">
-                  {{ stat.trend > 0 ? '↑' : '↓' }} {{ Math.abs(stat.trend) }}% 较上周
-                </el-tag>
-              </div>
-            </div>
-          </div>
+    <div class="stats-grid">
+      <div class="stat-card card-base" v-for="item in overviewStats" :key="item.title">
+        <div class="stat-top">
+          <span class="stat-title">{{ item.title }}</span>
+          <el-tag :type="item.trend >= 0 ? 'success' : 'danger'" effect="light" size="small">
+            {{ item.trendLabel }}
+          </el-tag>
         </div>
+        <div class="stat-value">{{ item.display }}</div>
+        <el-progress
+          :percentage="item.progress"
+          :stroke-width="10"
+          :show-text="false"
+          :color="item.trend >= 0 ? '#2563eb' : '#f97316'"
+        />
+      </div>
+    </div>
 
-        <!-- 周度对比模块 -->
-        <div class="week-compare-section">
-          <div class="compare-card">
-            <h3 class="section-title">周度对比</h3>
-            <div class="compare-items">
-              <div class="compare-item" v-for="(item, index) in weekCompareData" :key="index">
-                <div class="compare-label">{{ item.label }}</div>
-                <div class="compare-bars">
-                  <div class="bar-wrapper">
-                    <div class="bar-label">本周</div>
-                    <el-progress 
-                      :percentage="item.current" 
-                      :color="'#165DFF'"
-                      :stroke-width="12"
-                      :show-text="false"
-                    />
-                    <div class="bar-value">{{ item.current }}{{ item.unit }}</div>
-                  </div>
-                  <div class="bar-wrapper">
-                    <div class="bar-label">上周</div>
-                    <el-progress 
-                      :percentage="item.last" 
-                      :color="'#BFDBFE'"
-                      :stroke-width="12"
-                      :show-text="false"
-                    />
-                    <div class="bar-value light">{{ item.last }}{{ item.unit }}</div>
-                  </div>
-                </div>
+    <div class="content-layout">
+      <div class="main-column">
+        <el-card shadow="never" class="card-base panel-card">
+          <template #header>
+            <div class="panel-header">
+              <div>
+                <h3 class="panel-title">学习趋势</h3>
+                <p class="panel-subtitle">支持刷题量、学习时长与正确率趋势对比</p>
+              </div>
+              <div class="trend-tools">
+                <el-radio-group v-model="trendMetric" size="small">
+                  <el-radio-button
+                    v-for="option in trendMetricOptions"
+                    :key="option.value"
+                    :label="option.value"
+                  >
+                    {{ option.label }}
+                  </el-radio-button>
+                </el-radio-group>
+                <el-switch
+                  v-model="showCompare"
+                  inline-prompt
+                  active-text="双线"
+                  inactive-text="单线"
+                />
               </div>
             </div>
-          </div>
-        </div>
+          </template>
+          <div ref="trendChartRef" class="trend-chart"></div>
+        </el-card>
 
-        <!-- 学习趋势图 -->
-        <div class="trend-section">
-          <div class="trend-card">
-            <div class="trend-header">
-              <h3 class="section-title">学习趋势</h3>
-              <el-tabs v-model="trendTab" type="card" @tab-change="handleTabChange">
-                <el-tab-pane label="刷题量" name="questions"></el-tab-pane>
-                <el-tab-pane label="学习时长" name="duration"></el-tab-pane>
-              </el-tabs>
-            </div>
-            <div class="trend-chart" id="trendChart"></div>
-          </div>
-        </div>
-
-        <!-- 诊断分析区（三列布局） -->
-        <div class="diagnosis-section">
-          <!-- 知识掌握雷达图 -->
-          <div class="diagnosis-card">
-            <h3 class="section-title">知识点掌握结构</h3>
-            <div class="radar-chart" id="radarChart"></div>
+        <div class="diagnosis-grid">
+          <el-card shadow="never" class="card-base panel-card">
+            <template #header>
+              <div class="panel-header simple">
+                <h3 class="panel-title">知识点掌握雷达图</h3>
+              </div>
+            </template>
+            <div ref="radarChartRef" class="radar-chart"></div>
             <div class="radar-legend">
-              <div class="legend-item" v-for="(item, index) in radarData" :key="index">
-                <span class="legend-dot" :class="item.score < 60 ? 'weak' : 'strong'"></span>
+              <div class="legend-item" v-for="item in radarData" :key="item.name">
                 <span class="legend-name">{{ item.name }}</span>
-                <span class="legend-score" :class="item.score < 60 ? 'weak-text' : ''">{{ item.score }}分</span>
+                <span class="legend-score" :class="{ weak: item.score < 60 }">{{ item.score }}分</span>
               </div>
             </div>
-          </div>
+          </el-card>
 
-          <!-- 错题分布 -->
-          <div class="diagnosis-card">
-            <h3 class="section-title">错题分布</h3>
-            <div class="wrong-dist">
-              <div class="dist-item" v-for="(item, index) in wrongDistData" :key="index">
-                <div class="dist-name">
-                  {{ item.name }}
-                  <el-tag v-if="index < 3" type="danger" size="small" effect="dark" class="hot-tag">高频</el-tag>
+          <el-card shadow="never" class="card-base panel-card">
+            <template #header>
+              <div class="panel-header simple">
+                <h3 class="panel-title">错题与薄弱点</h3>
+              </div>
+            </template>
+            <div class="wrong-list">
+              <div class="wrong-item" v-for="item in wrongDistData" :key="item.name">
+                <div class="wrong-row">
+                  <span class="wrong-name">{{ item.name }}</span>
+                  <span class="wrong-percent">{{ item.percentage }}%</span>
                 </div>
-                <div class="dist-bar">
-                  <div class="bar-fill" :style="{ width: item.percentage + '%' }"></div>
-                </div>
-                <div class="dist-value">{{ item.percentage }}%</div>
+                <el-progress :percentage="item.percentage" :stroke-width="10" :show-text="false" />
               </div>
             </div>
-          </div>
-
-          <!-- 薄弱点推荐 -->
-          <div class="diagnosis-card weakness-card">
-            <h3 class="section-title">薄弱点推荐</h3>
-            <el-alert
-              title="当前学习风险点"
-              type="warning"
-              :closable="false"
-              show-icon
-              class="weakness-alert"
-            />
-            <div class="weakness-list">
-              <div class="weakness-item" v-for="(item, index) in weaknessData" :key="index">
-                <div class="weakness-icon">⚠️</div>
-                <div class="weakness-content">
-                  <div class="weakness-name">{{ item.name }}正确率仅 {{ item.rate }}%</div>
-                  <div class="weakness-suggest">📌 推荐：完成 {{ item.suggest }} 题专项练习</div>
+            <el-divider />
+            <div class="weak-list">
+              <div class="weak-item" v-for="item in weaknessData" :key="item.name">
+                <div>
+                  <div class="weak-title">{{ item.name }} 正确率 {{ item.rate }}%</div>
+                  <div class="weak-sub">建议专项练习 {{ item.suggest }} 题</div>
                 </div>
-                <el-button type="primary" size="small" class="practice-btn">去练习</el-button>
+                <el-button type="primary" link>去练习</el-button>
               </div>
             </div>
-          </div>
+          </el-card>
         </div>
       </div>
-
-      <!-- 右侧AI学习报告 -->
-      <div class="right-sidebar">
-        <div class="ai-report-card">
+      <aside class="report-column">
+        <el-card shadow="never" class="card-base report-card">
           <div class="report-header">
-            <el-icon size="24" class="report-icon"><ChatDotRound /></el-icon>
-            <h3 class="report-title">本周智能学习总结</h3>
+            <el-icon class="report-icon"><ChatDotRound /></el-icon>
+            <div>
+              <h3 class="report-title">{{ reportTitle }}</h3>
+              <p class="report-meta">自动生成时间：{{ generatedAtText }}</p>
+            </div>
           </div>
           <el-divider />
-          <div class="report-content">
-            <div class="report-section">
-              <h4 class="subsection-title">量化分析</h4>
-              <ul class="report-list">
-                <li>本周共完成 <span class="highlight">156</span> 题，较上周增长 <span class="highlight">22%</span></li>
-                <li>平均正确率 <span class="highlight">78%</span>，处于稳定区间</li>
-                <li>累计学习时长 <span class="highlight">12.5</span> 小时，日均 1.8 小时</li>
-              </ul>
-            </div>
-            <div class="report-section">
-              <h4 class="subsection-title">问题诊断</h4>
-              <ul class="report-list">
-                <li><span class="weak">动态规划</span> 为最大薄弱点，正确率仅 52%</li>
-                <li><span class="strong">英语阅读</span> 正确率显著提升，达到 85%</li>
-                <li>整体学习节奏稳定，保持当前状态</li>
-              </ul>
-            </div>
-            <div class="report-section">
-              <h4 class="subsection-title">学习建议</h4>
-              <ul class="report-list numbered">
-                <li>明天安排 20 分钟动态规划专项训练</li>
-                <li>保持当前英语阅读节奏，每日至少 30 分钟</li>
-                <li>周末进行一次完整模拟测试，检验学习成果喝茶水单词和阿萨德法国红酒快乐请前往儿童与自行车vbnm</li>
-              </ul>
-            </div>
+          <div class="report-section" v-for="section in reportSections" :key="section.title">
+            <h4 class="report-section-title">{{ section.title }}</h4>
+            <ul class="report-list">
+              <li v-for="line in section.items" :key="line">{{ line }}</li>
+            </ul>
           </div>
           <div class="report-actions">
-            <el-button type="primary" text>查看完整报告</el-button>
-            <el-button type="primary" text>导出数据</el-button>
+            <el-button text type="primary" @click="regenerateReport">重新生成</el-button>
+            <el-button type="primary" plain @click="exportReport">导出数据</el-button>
           </div>
-        </div>
-      </div>
+        </el-card>
+      </aside>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, nextTick, watch } from 'vue'
-import {  ChatDotRound } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { ChatDotRound } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 
-// 当前周次选择
 const currentWeek = ref('current')
+const trendMetric = ref('questions')
+const showCompare = ref(true)
+const reportCycle = ref('weekly')
+const generatedAt = ref(new Date())
+const trendChartRef = ref(null)
+const radarChartRef = ref(null)
 
-// 趋势图标签页
-const trendTab = ref('questions')
+const trendMetricOptions = [
+  { label: '刷题量', value: 'questions' },
+  { label: '学习时长', value: 'duration' },
+  { label: '正确率', value: 'accuracy' }
+]
 
-// 核心概览数据
-const overviewStats = reactive([
-  { title: '本周学习时长', value: '12.5h', trend: 18 },
-  { title: '刷题总题量', value: '156', trend: 22 },
-  { title: '平均正确率', value: '78%', trend: 5 },
-  { title: '完成知识点', value: '24', trend: -3 }
-])
+const dashboardData = reactive({
+  current: {
+    label: '本周',
+    days: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    kpi: { duration: 12.8, questions: 164, accuracy: 79, completed: 26 },
+    trend: {
+      questions: [18, 20, 16, 24, 26, 30, 30],
+      duration: [1.3, 1.5, 1.2, 1.8, 1.9, 2.5, 2.6],
+      accuracy: [72, 74, 75, 78, 80, 81, 79]
+    },
+    radar: [
+      { name: '数学计算', score: 84 },
+      { name: '逻辑推理', score: 74 },
+      { name: '英语阅读', score: 88 },
+      { name: '编程基础', score: 67 },
+      { name: '数据结构', score: 56 }
+    ],
+    wrong: [
+      { name: '动态规划', percentage: 68 },
+      { name: '递归算法', percentage: 52 },
+      { name: '图论基础', percentage: 43 },
+      { name: '排序算法', percentage: 29 }
+    ],
+    weakness: [
+      { name: '动态规划', rate: 52, suggest: 18 },
+      { name: '数据结构', rate: 56, suggest: 14 },
+      { name: '编程基础', rate: 67, suggest: 10 }
+    ]
+  },
+  last: {
+    label: '上周',
+    days: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+    kpi: { duration: 10.9, questions: 137, accuracy: 74, completed: 21 },
+    trend: {
+      questions: [14, 16, 13, 18, 22, 26, 28],
+      duration: [1.0, 1.2, 1.1, 1.4, 1.6, 2.1, 2.5],
+      accuracy: [69, 70, 71, 72, 75, 76, 74]
+    },
+    radar: [
+      { name: '数学计算', score: 79 },
+      { name: '逻辑推理', score: 69 },
+      { name: '英语阅读', score: 83 },
+      { name: '编程基础', score: 62 },
+      { name: '数据结构', score: 51 }
+    ],
+    wrong: [
+      { name: '动态规划', percentage: 73 },
+      { name: '递归算法', percentage: 57 },
+      { name: '图论基础', percentage: 46 },
+      { name: '排序算法', percentage: 33 }
+    ],
+    weakness: [
+      { name: '动态规划', rate: 47, suggest: 20 },
+      { name: '数据结构', rate: 51, suggest: 16 },
+      { name: '编程基础', rate: 62, suggest: 12 }
+    ]
+  },
+  custom: {
+    label: '近30天',
+    days: ['第1周', '第2周', '第3周', '第4周'],
+    kpi: { duration: 48.6, questions: 618, accuracy: 76, completed: 82 },
+    trend: {
+      questions: [132, 148, 157, 181],
+      duration: [10.8, 11.5, 12.7, 13.6],
+      accuracy: [72, 74, 77, 79]
+    },
+    radar: [
+      { name: '数学计算', score: 82 },
+      { name: '逻辑推理', score: 72 },
+      { name: '英语阅读', score: 86 },
+      { name: '编程基础', score: 66 },
+      { name: '数据结构', score: 58 }
+    ],
+    wrong: [
+      { name: '动态规划', percentage: 64 },
+      { name: '递归算法', percentage: 51 },
+      { name: '图论基础', percentage: 40 },
+      { name: '排序算法', percentage: 27 }
+    ],
+    weakness: [
+      { name: '动态规划', rate: 54, suggest: 20 },
+      { name: '数据结构', rate: 58, suggest: 16 },
+      { name: '编程基础', rate: 66, suggest: 13 }
+    ]
+  }
+})
 
-// 周度对比数据
-const weekCompareData = reactive([
-  { label: '刷题量', current: 85, last: 70, unit: '题' },
-  { label: '正确率', current: 78, last: 73, unit: '%' },
-  { label: '日均时长', current: 90, last: 75, unit: 'min' }
-])
+const dataByKey = computed(() => dashboardData[currentWeek.value] || dashboardData.current)
+const compareData = computed(() => {
+  if (currentWeek.value === 'current') return dashboardData.last
+  if (currentWeek.value === 'last') return dashboardData.custom
+  return dashboardData.last
+})
 
-// 雷达图数据
-const radarData = reactive([
-  { name: '数学计算', score: 85 },
-  { name: '逻辑推理', score: 72 },
-  { name: '英语阅读', score: 88 },
-  { name: '编程基础', score: 65 },
-  { name: '数据结构', score: 52 }
-])
+const radarData = computed(() => dataByKey.value.radar)
+const wrongDistData = computed(() => dataByKey.value.wrong)
+const weaknessData = computed(() => dataByKey.value.weakness)
 
-// 错题分布数据
-const wrongDistData = reactive([
-  { name: '动态规划', percentage: 70 },
-  { name: '递归算法', percentage: 55 },
-  { name: '图论基础', percentage: 45 },
-  { name: '排序算法', percentage: 30 },
-  { name: '查找算法', percentage: 20 }
-])
+const formatTrend = (value) => (value >= 0 ? `+${value}%` : `${value}%`)
+const calcTrend = (currentValue, previousValue) => {
+  if (!previousValue) return 0
+  return Math.round(((currentValue - previousValue) / previousValue) * 100)
+}
 
-// 薄弱点数据
-const weaknessData = reactive([
-  { name: '动态规划', rate: 52, suggest: 15 },
-  { name: '数据结构', rate: 58, suggest: 12 },
-  { name: '编程基础', rate: 65, suggest: 10 }
-])
+const overviewStats = computed(() => {
+  const current = dataByKey.value.kpi
+  const previous = compareData.value.kpi
+  return [
+    {
+      title: '学习时长',
+      display: `${current.duration}h`,
+      trend: calcTrend(current.duration, previous.duration),
+      progress: Math.min(100, Math.round((current.duration / 16) * 100))
+    },
+    {
+      title: '刷题量',
+      display: `${current.questions}题`,
+      trend: calcTrend(current.questions, previous.questions),
+      progress: Math.min(100, Math.round((current.questions / 200) * 100))
+    },
+    {
+      title: '平均正确率',
+      display: `${current.accuracy}%`,
+      trend: calcTrend(current.accuracy, previous.accuracy),
+      progress: current.accuracy
+    },
+    {
+      title: '完成知识点',
+      display: `${current.completed}个`,
+      trend: calcTrend(current.completed, previous.completed),
+      progress: Math.min(100, Math.round((current.completed / 40) * 100))
+    }
+  ].map((item) => ({ ...item, trendLabel: formatTrend(item.trend) }))
+})
 
-// 图表实例
-let radarChart = null
-let trendChart = null
+const metricConfigMap = {
+  questions: { name: '刷题量', unit: '题', color: '#2563eb' },
+  duration: { name: '学习时长', unit: '小时', color: '#0ea5e9' },
+  accuracy: { name: '正确率', unit: '%', color: '#14b8a6' }
+}
 
-// 初始化雷达图
-const initRadarChart = () => {
-  const chartDom = document.getElementById('radarChart')
-  if (!chartDom) return
-  
-  radarChart = echarts.init(chartDom)  
-  const option = {
-    radar: {
-      indicator: radarData.map(item => ({
-        name: item.name,
-        max: 100
-      })),
-      radius: '65%',
-      splitNumber: 4,
-      axisName: {
-        color: '#64748b',
-        fontSize: 12
-      },
-      splitLine: {
-        lineStyle: {
-          color: '#e2e8f0'
-        }
-      },
-      splitArea: {
-        show: true,
-        areaStyle: {
-          color: ['rgba(22, 93, 255, 0.05)', 'rgba(22, 93, 255, 0.1)']
-        }
-      },
-      axisLine: {
-        lineStyle: {
-          color: '#e2e8f0'
-        }
+const getWeakestItem = (items) => items.slice().sort((a, b) => a.score - b.score)[0]
+const getStrongestItem = (items) => items.slice().sort((a, b) => b.score - a.score)[0]
+
+const reportTitle = computed(() => {
+  const cycleLabel = reportCycle.value === 'weekly' ? '周度学习报告' : '月度学习报告'
+  return `${dataByKey.value.label}${cycleLabel}`
+})
+
+const generatedAtText = computed(() => {
+  const value = generatedAt.value
+  const year = value.getFullYear()
+  const month = `${value.getMonth() + 1}`.padStart(2, '0')
+  const day = `${value.getDate()}`.padStart(2, '0')
+  const hour = `${value.getHours()}`.padStart(2, '0')
+  const minute = `${value.getMinutes()}`.padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${minute}`
+})
+
+const reportSections = computed(() => {
+  const kpi = dataByKey.value.kpi
+  const previous = compareData.value.kpi
+  const weakest = getWeakestItem(radarData.value)
+  const strongest = getStrongestItem(radarData.value)
+  const topWrong = wrongDistData.value[0]
+  const suggestionLines = weaknessData.value.map(
+    (item) => `${item.name} 建议增加 ${item.suggest} 题专项训练，目标正确率提升至 ${Math.min(95, item.rate + 12)}%`
+  )
+
+  return [
+    {
+      title: '量化分析',
+      items: [
+        `${dataByKey.value.label}累计刷题 ${kpi.questions} 题，较对比周期变化 ${formatTrend(calcTrend(kpi.questions, previous.questions))}`,
+        `学习总时长 ${kpi.duration} 小时，平均正确率 ${kpi.accuracy}%`,
+        `完成知识点 ${kpi.completed} 个，学习覆盖面持续扩展`
+      ]
+    },
+    {
+      title: '问题诊断',
+      items: [
+        `当前主要薄弱点为 ${weakest.name}（掌握度 ${weakest.score} 分）`,
+        `最稳定优势项为 ${strongest.name}（掌握度 ${strongest.score} 分）`,
+        `错题占比最高的是 ${topWrong.name}（${topWrong.percentage}%），建议优先复盘`
+      ]
+    },
+    {
+      title: '数据驱动建议',
+      items: suggestionLines
+    }
+  ]
+})
+
+let trendChartInstance = null
+let radarChartInstance = null
+
+const renderTrendChart = () => {
+  if (!trendChartInstance) return
+  const currentSeries = dataByKey.value.trend[trendMetric.value]
+  const previousSeries = compareData.value.trend[trendMetric.value]
+  const metric = metricConfigMap[trendMetric.value]
+  const series = [
+    {
+      name: `${dataByKey.value.label}${metric.name}`,
+      type: 'line',
+      smooth: true,
+      data: currentSeries,
+      symbol: 'circle',
+      symbolSize: 7,
+      lineStyle: { width: 3, color: metric.color },
+      itemStyle: { color: metric.color },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: `${metric.color}55` },
+          { offset: 1, color: `${metric.color}0d` }
+        ])
       }
+    }
+  ]
+
+  if (showCompare.value) {
+    series.push({
+      name: `${compareData.value.label}${metric.name}`,
+      type: 'line',
+      smooth: true,
+      data: previousSeries,
+      symbol: 'emptyCircle',
+      symbolSize: 6,
+      lineStyle: { width: 2, type: 'dashed', color: '#94a3b8' },
+      itemStyle: { color: '#94a3b8' }
+    })
+  }
+
+  trendChartInstance.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { top: 0, textStyle: { color: '#475569', fontSize: 12 } },
+    grid: { left: '4%', right: '4%', bottom: '4%', top: 36, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: dataByKey.value.days,
+      axisLabel: { color: '#64748b', fontSize: 12 },
+      axisLine: { lineStyle: { color: '#e2e8f0' } }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: {
+        color: '#64748b',
+        formatter: (value) => `${value}${metric.unit === '小时' ? 'h' : metric.unit}`
+      },
+      splitLine: { lineStyle: { color: '#eef2ff' } }
+    },
+    series
+  })
+}
+
+const renderRadarChart = () => {
+  if (!radarChartInstance) return
+  radarChartInstance.setOption({
+    radar: {
+      indicator: radarData.value.map((item) => ({ name: item.name, max: 100 })),
+      radius: '62%',
+      splitNumber: 5,
+      axisName: { color: '#475569', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#dbeafe' } },
+      splitArea: { show: true, areaStyle: { color: ['#eff6ff', '#f8fafc'] } }
     },
     series: [
       {
         type: 'radar',
         data: [
           {
-            value: radarData.map(item => item.score),
-            name: '知识掌握度',
-            areaStyle: {
-              color: 'rgba(22, 93, 255, 0.3)'
-            },
-            lineStyle: {
-              color: '#165DFF',
-              width: 2
-            },
-            itemStyle: {
-              color: '#165DFF'
-            }
+            value: radarData.value.map((item) => item.score),
+            name: `${dataByKey.value.label}掌握度`,
+            areaStyle: { color: 'rgba(37, 99, 235, 0.2)' },
+            lineStyle: { color: '#2563eb', width: 2 },
+            itemStyle: { color: '#2563eb' }
           }
         ]
       }
     ]
-  }
-  
-  radarChart.setOption(option)
-}
-
-// 初始化趋势图
-const initTrendChart = () => {
-  const chartDom = document.getElementById('trendChart')
-  if (!chartDom) return
-  
-  trendChart = echarts.init(chartDom)  
-  const dates = Array.from({ length: 14 }, (_, i) => {
-    const date = new Date()
-    date.setDate(date.getDate() - (13 - i))
-    return `${date.getMonth() + 1}/${date.getDate()}`
   })
-  
-  const questionData = [12, 15, 8, 20, 18, 25, 22, 30, 28, 35, 32, 40, 38, 45]
-  const option = {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'cross'
-      }
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: dates,
-      axisLabel: {
-        color: '#64748b',
-        fontSize: 11
-      },
-      axisLine: {
-        lineStyle: {
-          color: '#e2e8f0'
-        }
-      }
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: {
-        color: '#64748b'
-      },
-      axisLine: {
-        lineStyle: {
-          color: '#e2e8f0'
-        }
-      },
-      splitLine: {
-        lineStyle: {
-          color: '#f1f5f9'
-        }
-      }
-    },
-    series: [
-      {
-        name: '刷题量',
-        type: 'line',
-        data: questionData,
-        smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        lineStyle: {
-          color: '#165DFF',
-          width: 2
-        },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(22, 93, 255, 0.3)' },
-            { offset: 1, color: 'rgba(22, 93, 255, 0.05)' }
-          ])
-        },
-        itemStyle: {
-          color: '#165DFF'
-        }
-      }
-    ]
+}
+
+const regenerateReport = () => {
+  generatedAt.value = new Date()
+  ElMessage.success('已基于最新学习数据生成报告')
+}
+
+const exportReport = () => {
+  ElMessage.success('学习报告导出任务已创建')
+}
+
+const resizeCharts = () => {
+  if (trendChartInstance) trendChartInstance.resize()
+  if (radarChartInstance) radarChartInstance.resize()
+}
+
+const initCharts = () => {
+  if (trendChartRef.value && !trendChartInstance) {
+    trendChartInstance = echarts.init(trendChartRef.value)
   }
-  
-  trendChart.setOption(option)
-}
-
-// 切换趋势图数据
-const switchTrendData = () => {
-  if (!trendChart) return
-  
-  if (trendTab.value === 'questions') {
-    const questionData = [12, 15, 8, 20, 18, 25, 22, 30, 28, 35, 32, 40, 38, 45]
-    trendChart.setOption({
-      series: [
-        {
-          name: '刷题量',
-          type: 'line',
-          data: questionData
-        }
-      ]
-    })
-  } else {
-    const durationData = [1.2, 1.5, 0.8, 2.0, 1.8, 2.5, 2.2, 3.0, 2.8, 3.5, 3.2, 4.0, 3.8, 4.5]
-    trendChart.setOption({
-      series: [
-        {
-          name: '学习时长（小时）',
-          type: 'line',
-          data: durationData
-        }
-      ]
-    })
+  if (radarChartRef.value && !radarChartInstance) {
+    radarChartInstance = echarts.init(radarChartRef.value)
   }
+  renderTrendChart()
+  renderRadarChart()
 }
 
-// 标签页切换处理
-const handleTabChange = () => {
-  switchTrendData()
-}
-
-// 组件挂载时初始化图表
 onMounted(() => {
   nextTick(() => {
-    initRadarChart()
-    initTrendChart()
+    initCharts()
+  })
+  window.addEventListener('resize', resizeCharts)
+})
+
+watch([currentWeek, trendMetric, showCompare], () => {
+  nextTick(() => {
+    renderTrendChart()
+    renderRadarChart()
   })
 })
 
-// 监听趋势图标签页变化
-watch(trendTab, () => {
-  switchTrendData()
+watch([currentWeek, reportCycle], () => {
+  generatedAt.value = new Date()
 })
 
-// 窗口大小改变时重绘图表
-window.addEventListener('resize', () => {
-  if (radarChart) radarChart.resize()
-  if (trendChart) trendChart.resize()
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeCharts)
+  if (trendChartInstance) trendChartInstance.dispose()
+  if (radarChartInstance) radarChartInstance.dispose()
 })
 </script>
 
 <style scoped>
-/* 页面根容器 */
 .learning-dashboard {
-  padding: 24px 32px 24px 16px;
-  width: 95%;
-  margin-left: 100px;
-  margin-right: 200px;
+  padding: 24px;
   background: #f8fafc;
   min-height: 100vh;
+  color: #1e293b;
 }
 
-/* 顶部区域 */
 .dashboard-header {
-  margin-bottom: 24px;
-}
-
-.header-content {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.card-base {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
 }
 
 .header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  max-width: 680px;
 }
 
-.header-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #165DFF 0%, #3B82F6 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-}
-
-.header-text h1 {
-  font-size: 28px;
+.dashboard-title {
+  font-size: 26px;
   font-weight: 700;
-  color: #165DFF;
-  margin: 0 0 4px 0;
+  margin: 0 0 6px 0;
+  color: #0f172a;
 }
 
-.header-text p {
+.dashboard-subtitle {
   font-size: 14px;
   color: #64748b;
   margin: 0;
+  line-height: 1.6;
 }
 
-.header-right .el-radio-group {
-  transform: scale(1.02);
-}
-
-/* 主内容区：左右布局 */
-.main-content-wrapper {
+.header-right {
   display: flex;
-  gap: 24px;
-  align-items: flex-start;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.left-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.right-sidebar {
-  width: 500px;
-  flex-shrink: 0;
-  position: sticky;
-  top: 24px;
-  align-self: stretch;
-}
-
-/* 核心概览区域 */
-.overview-section {
-  margin-bottom: 24px;
+.cycle-select {
+  width: 100px;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 24px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
 }
 
 .stat-card {
-  background: white;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
-  transition: all 0.3s ease;
+  padding: 14px;
 }
 
-.stat-card:hover {
-  box-shadow: 0 4px 12px rgba(22, 93, 255, 0.1);
-  transform: translateY(-2px);
-}
-
-.stat-header {
-  margin-bottom: 12px;
-}
-
-.stat-title {
-  font-size: 14px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.stat-value {
-  font-size: 36px;
-  font-weight: 700;
-  color: #165DFF;
-  margin-bottom: 8px;
-}
-
-.stat-trend {
-  display: flex;
-  align-items: center;
-}
-
-/* 周度对比区域 */
-.week-compare-section {
-  margin-bottom: 24px;
-}
-
-.compare-card {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
-}
-
-.section-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1e293b;
-  margin: 0 0 20px 0;
-}
-
-.compare-items {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px;
-}
-
-.compare-item {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.compare-label {
-  font-size: 14px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.compare-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.bar-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.bar-label {
-  font-size: 12px;
-  color: #94a3b8;
-  width: 40px;
-  flex-shrink: 0;
-}
-
-.bar-wrapper .el-progress {
-  flex: 1;
-}
-
-.bar-value {
-  font-size: 14px;
-  color: #165DFF;
-  font-weight: 600;
-  width: 60px;
-  text-align: right;
-}
-
-.bar-value.light {
-  color: #94a3b8;
-}
-
-/* 学习趋势区域 */
-.trend-section {
-  margin-bottom: 24px;
-}
-
-.trend-card {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
-}
-
-.trend-header {
+.stat-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
+}
+
+.stat-title {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1d4ed8;
+  margin-bottom: 10px;
+}
+
+.content-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+}
+
+.main-column {
+  min-width: 0;
+}
+
+.report-column {
+  min-width: 0;
+}
+
+.panel-card {
+  margin-bottom: 16px;
+}
+
+:deep(.panel-card .el-card__header) {
+  border-bottom: 1px solid #eef2ff;
+  padding: 14px 16px;
+}
+
+:deep(.panel-card .el-card__body) {
+  padding: 16px;
+}
+
+.panel-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.panel-header.simple {
+  grid-template-columns: 1fr;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.panel-subtitle {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.trend-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .trend-chart {
-  min-height: 300px;
   width: 100%;
+  min-height: 320px;
 }
 
-.chart-placeholder {
-  width: 100%;
-  height: 300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 诊断分析区域（三列布局） */
-.diagnosis-section {
+.diagnosis-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.diagnosis-card {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  border: 1px solid #e2e8f0;
-}
-
-/* 雷达图 */
 .radar-chart {
-  min-height: 200px;
-  margin-bottom: 16px;
+  min-height: 260px;
+  margin-bottom: 10px;
 }
 
 .radar-legend {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.legend-dot.strong {
-  background: #165DFF;
-}
-
-.legend-dot.weak {
-  background: #ef4444;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
 }
 
 .legend-name {
+  font-size: 13px;
   color: #475569;
-  flex: 1;
 }
 
 .legend-score {
-  color: #165DFF;
+  font-size: 13px;
+  color: #1d4ed8;
   font-weight: 600;
 }
 
-.legend-score.weak-text {
+.legend-score.weak {
   color: #ef4444;
 }
 
-/* 错题分布 */
-.wrong-dist {
+.wrong-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-}
-
-.dist-item {
-  display: flex;
-  align-items: center;
   gap: 12px;
 }
 
-.dist-name {
-  font-size: 13px;
-  color: #475569;
-  width: 80px;
+.wrong-row {
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.hot-tag {
-  font-size: 10px;
-  padding: 0 4px;
-  height: 16px;
-}
-
-.dist-bar {
-  flex: 1;
-  height: 16px;
-  background: #f1f5f9;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #165DFF 0%, #3B82F6 100%);
-  border-radius: 8px;
-  transition: width 0.3s ease;
-}
-
-.dist-value {
-  font-size: 13px;
-  color: #165DFF;
-  font-weight: 600;
-  width: 40px;
-  text-align: right;
-}
-
-/* 薄弱点推荐 */
-.weakness-card {
-  display: flex;
-  flex-direction: column;
-}
-
-.weakness-alert {
-  margin-bottom: 16px;
-}
-
-.weakness-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.weakness-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  background: #fefce8;
-  border-radius: 8px;
-  border: 1px solid #fef08a;
-}
-
-.weakness-icon {
-  font-size: 20px;
-}
-
-.weakness-content {
-  flex: 1;
-}
-
-.weakness-name {
-  font-size: 13px;
-  color: #1e293b;
-  font-weight: 600;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
 
-.weakness-suggest {
+.wrong-name {
+  font-size: 13px;
+  color: #475569;
+}
+
+.wrong-percent {
+  font-size: 13px;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.weak-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.weak-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.weak-title {
+  font-size: 14px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.weak-sub {
+  margin-top: 2px;
   font-size: 12px;
   color: #64748b;
 }
 
-.practice-btn {
-  flex-shrink: 0;
+.report-card {
+  position: sticky;
+  top: 20px;
 }
 
-/* AI学习报告 */
-.ai-report-card {
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-  border-radius: 12px;
-  padding: 28px;
-  border: 1px solid #bfdbfe;
-  height: 100%;
-  overflow-y: auto;
+:deep(.report-card .el-card__body) {
+  padding: 16px;
 }
 
 .report-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 10px;
 }
 
 .report-icon {
-  color: #165DFF;
+  font-size: 22px;
+  color: #1d4ed8;
 }
 
 .report-title {
-  font-size: 22px;
-  font-weight: 600;
-  color: #165DFF;
   margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
 }
 
-.report-content {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  margin-bottom: 24px;
+.report-meta {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: #64748b;
 }
 
 .report-section {
-  padding: 20px;
-  background: white;
-  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  margin-bottom: 10px;
 }
 
-.subsection-title {
-  font-size: 18px;
+.report-section-title {
+  margin: 0 0 8px 0;
+  font-size: 15px;
   font-weight: 600;
-  color: #1e293b;
-  margin: 0 0 16px 0;
+  color: #0f172a;
 }
 
 .report-list {
-  list-style: none;
-  padding: 0;
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
 }
 
 .report-list li {
-  font-size: 16px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
   color: #475569;
-  position: relative;
-  padding-left: 16px;
-}
-
-.report-list li::before {
-  content: "•";
-  color: #165DFF;
-  position: absolute;
-  left: 0;
-  font-size: 18px;
-}
-
-.report-list.numbered {
-  counter-reset: item;
-}
-
-.report-list.numbered li {
-  counter-increment: item;
-  padding-left: 24px;
-}
-
-.report-list.numbered li::before {
-  content: counter(item) ".";
-  color: #165DFF;
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.highlight {
-  color: #165DFF;
-  font-weight: 600;
-  font-size: 18px;
-}
-
-.weak {
-  color: #ef4444;
-  font-weight: 600;
-}
-
-.strong {
-  color: #22c55e;
-  font-weight: 600;
 }
 
 .report-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 16px;
+  justify-content: space-between;
+  margin-top: 6px;
 }
 
-/* 响应式设计 */
 @media (max-width: 1200px) {
   .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  
-  .compare-items {
+
+  .content-layout {
     grid-template-columns: 1fr;
   }
-  
-  .diagnosis-section {
-    grid-template-columns: 1fr;
-  }
-  
-  .report-content {
-    grid-template-columns: 1fr;
+
+  .report-card {
+    position: static;
   }
 }
 
 @media (max-width: 768px) {
   .learning-dashboard {
-    padding: 16px;
+    padding: 14px;
   }
-  
+
+  .dashboard-header {
+    padding: 14px;
+  }
+
+  .dashboard-title {
+    font-size: 22px;
+  }
+
   .stats-grid {
     grid-template-columns: 1fr;
   }
-  
-  .header-content {
-    flex-direction: column;
-    align-items: flex-start;
+
+  .diagnosis-grid {
+    grid-template-columns: 1fr;
   }
-  
-  .header-text h1 {
-    font-size: 22px;
+
+  .panel-header {
+    grid-template-columns: 1fr;
+  }
+
+  .report-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>
