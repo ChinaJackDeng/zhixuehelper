@@ -276,3 +276,118 @@ export function generatePaper(data) {
     }
   })
 }
+
+// ==================== 新增功能接口 ====================
+
+/**
+ * 编辑题目
+ * @param {number} questionId - 题目 ID
+ * @param {Object} data - 请求数据
+ * @param {string} data.stem - 题目描述
+ * @param {string} data.type - 题型（single|multi|judge|fill|essay）
+ * @param {Object} data.options - 选项对象 { A: "选项A", B: "选项B", ... }
+ * @param {string} data.answer - 正确答案
+ * @param {string} data.explanation - 题目解析
+ * @param {string} data.knowledge - 知识点
+ * @param {string} data.difficulty - 难度（easy|medium|hard）
+ */
+export function updateQuestion(questionId, data) {
+  return service({
+    url: `/exam/questions/${questionId}`,
+    method: 'put',
+    data: data
+  })
+}
+
+/**
+ * 保存考试状态
+ * @param {Object} data - 请求数据
+ * @param {number} data.question_set_id - 题集 ID
+ * @param {Object} data.answers - 答案对象
+ * @param {number} data.time_used - 已用时（秒）
+ * @param {number} data.time_left - 剩余时间（秒）
+ * @param {number} data.current_question_index - 当前题目索引
+ */
+export function saveExamState(data) {
+  return service({
+    url: '/exam/exams/save-state',
+    method: 'post',
+    data: data
+  })
+}
+
+/**
+ * 恢复考试状态
+ * @param {number} questionSetId - 题集 ID
+ */
+export function restoreExamState(questionSetId) {
+  return service({
+    url: `/exam/exams/restore-state/${questionSetId}`,
+    method: 'get'
+  })
+}
+
+/**
+ * 获取成绩历史
+ * @param {Object} params - 查询参数
+ * @param {number} params.page - 页码（默认1）
+ * @param {number} params.page_size - 每页数量（默认10）
+ * @param {number} params.question_set_id - 题集ID（可选）
+ */
+export function getExamHistory(params = {}) {
+  return service({
+    url: '/exam/exams/history',
+    method: 'get',
+    params: {
+      page: params.page || 1,
+      page_size: params.page_size || 10,
+      question_set_id: params.question_set_id || undefined
+    }
+  })
+}
+
+/**
+ * 开始考试（支持自定义时间和随机排序）
+ * @param {Object} data - 请求数据
+ * @param {number} data.question_set_id - 题集 ID
+ * @param {number} data.custom_duration - 自定义考试时间（秒），可选
+ * @param {boolean} data.random_order - 是否随机排序题目，可选
+ */
+export function startExamWithConfig(data) {
+  return service({
+    url: '/exam/exams/start',
+    method: 'post',
+    data: data
+  })
+}
+
+/**
+ * 获取题集题目（支持随机排序）
+ * @param {number} questionSetId - 题集 ID
+ * @param {Object} params - 查询参数
+ * @param {boolean} params.random - 是否随机排序
+ */
+export function getQuestionSetQuestions(questionSetId, params = {}) {
+  return service({
+    url: `/exam/question-sets/${questionSetId}/questions`,
+    method: 'get',
+    params: {
+      random: params.random || false
+    }
+  })
+}
+
+/**
+ * 检查考试模式切换
+ * @param {Object} data - 请求数据
+ * @param {number} data.question_set_id - 题集 ID
+ * @param {string} data.current_mode - 当前模式（practice|exam）
+ * @param {string} data.target_mode - 目标模式（practice|exam）
+ */
+export function checkExamModeSwitch(data) {
+  return service({
+    url: '/exam/exams/check-switch',
+    method: 'post',
+    data: data
+  })
+}
