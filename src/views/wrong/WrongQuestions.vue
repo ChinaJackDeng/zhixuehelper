@@ -48,13 +48,14 @@
     <!-- 筛选栏 -->
     <div class="filter-section">
       <div class="filter-left">
-        <el-select v-model="filter.subject" placeholder="选择学科" clearable>
-          <el-option label="全部学科" value="" />
-          <el-option label="数学" value="math" />
-          <el-option label="语文" value="chinese" />
-          <el-option label="英语" value="english" />
-          <el-option label="物理" value="physics" />
-          <el-option label="化学" value="chemistry" />
+        <el-select v-model="filter.tagId" placeholder="选择知识标签" clearable>
+          <el-option label="全部标签" value="" />
+          <el-option
+            v-for="tag in tagOptions"
+            :key="tag.id"
+            :label="tag.name"
+            :value="String(tag.id)"
+          />
         </el-select>
 
         <el-select v-model="filter.sortBy" placeholder="排序方式">
@@ -66,7 +67,7 @@
     </div>
 
     <!-- 错题集网格 -->
-    <div class="sets-grid">
+    <div class="sets-grid" v-loading="loading">
       <div 
         v-for="set in filteredSets" 
         :key="set.id" 
@@ -82,8 +83,8 @@
           <p class="set-time">{{ formatDate(set.createTime) }}</p>
         </div>
         <div class="set-tags">
-          <el-tag :type="getSubjectType(set.subject)" size="small">
-            {{ getSubjectName(set.subject) }}
+          <el-tag :style="{ borderColor: set.primaryTagColor || '#dcdfe6', color: set.primaryTagColor || '#606266' }" size="small">
+            {{ set.primaryTagName }}
           </el-tag>
           <el-tag :type="getStatusType(set.status)" size="small">
             {{ getStatusName(set.status) }}
@@ -102,86 +103,161 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Folder, FolderOpened, Plus, Search } from '@element-plus/icons-vue'
+import { getMistakes } from '@/api/exam'
+import { getTagList } from '@/api/knowledge'
 
 const router = useRouter()
 
 const searchKeyword = ref('')
 const filter = ref({
-  subject: '',
+  tagId: '',
   sortBy: 'recent'
 })
+const tagOptions = ref([])
+const wrongQuestionSets = ref([])
+const loading = ref(false)
 
-// 错题集数据
-const wrongQuestionSets = ref([
-  {
-    id: 1,
-    name: '二次函数专项',
-    subject: 'math',
-    questionCount: 12,
-    createTime: '2026-03-20T10:30:00',
-    status: 'practicing'
-  },
-  {
-    id: 2,
-    name: '力学基础错题',
-    subject: 'physics',
-    questionCount: 8,
-    createTime: '2026-03-18T14:20:00',
-    status: 'pending'
-  },
-  {
-    id: 3,
-    name: '英语语法易错点',
-    subject: 'english',
-    questionCount: 15,
-    createTime: '2026-03-15T09:00:00',
-    status: 'mastered'
-  },
-  {
-    id: 4,
-    name: '化学反应方程式',
-    subject: 'chemistry',
-    questionCount: 6,
-    createTime: '2026-03-19T16:45:00',
-    status: 'pending'
-  },
-  {
-    id: 5,
-    name: '古诗词鉴赏',
-    subject: 'chinese',
-    questionCount: 10,
-    createTime: '2026-03-17T11:30:00',
-    status: 'practicing'
-  },
-  {
-    id: 6,
-    name: '函数与导数',
-    subject: 'math',
-    questionCount: 20,
-    createTime: '2026-03-16T13:20:00',
-    status: 'practicing'
-  },
-  {
-    id: 7,
-    name: '电磁学专题',
-    subject: 'physics',
-    questionCount: 9,
-    createTime: '2026-03-14T10:00:00',
-    status: 'pending'
-  },
-  {
-    id: 8,
-    name: '完形填空技巧',
-    subject: 'english',
-    questionCount: 18,
-    createTime: '2026-03-13T15:30:00',
-    status: 'mastered'
+const normalizeTagResponse = (response) => {
+  if (Array.isArray(response?.tags)) return response.tags
+  if (Array.isArray(response?.data?.tags)) return response.data.tags
+  if (Array.isArray(response)) return response
+  return []
+}
+
+const calcSetStatus = (questionCount, latestTime) => {
+  const latest = latestTime ? new Date(latestTime).getTime() : Date.now()
+  const dayGap = Math.floor((Date.now() - latest) / 86400000)
+  if (questionCount <= 2 && dayGap >= 7) return 'mastered'
+  if (dayGap <= 2) return 'practicing'
+  return 'pending'
+}
+
+const buildQuestionSetBasedSets = (mistakes) => {
+  const setMap = new Map()
+  mistakes.forEach(mistake => {
+    const question = mistake.question || {}
+    const setTags = Array.isArray(mistake.question_set_tags) ? mistake.question_set_tags : []
+    const key = String(mistake.question_set_id || 'unbound')
+    if (!setMap.has(key)) {
+      setMap.set(key, {
+        id: key,
+        questionSetId: mistake.question_set_id || null,
+        name: mistake.question_set_name || `题集 ${key}`,
+        questionCount: 0,
+        createTime: mistake.added_at || new Date().toISOString(),
+        status: 'pending',
+        questions: [],
+        tagIds: [],
+        tagNames: [],
+        primaryTagName: '未打标签',
+        primaryTagColor: '#909399'
+      })
+    }
+    const currentSet = setMap.get(key)
+    currentSet.questionCount += 1
+    if (mistake.mastered) {
+      currentSet.masteredCount = (currentSet.masteredCount || 0) + 1
+    }
+    currentSet.questions.push({
+      id: question.id,
+      mistakeId: mistake.id,
+      stem: question.stem,
+      type: question.type,
+      added_at: mistake.added_at,
+      user_answer: mistake.user_answer,
+      mastered: !!mistake.mastered,
+      tags: question.tags || []
+    })
+    setTags.forEach(tag => {
+      const tagId = String(tag.id)
+      if (!currentSet.tagIds.includes(tagId)) {
+        currentSet.tagIds.push(tagId)
+        currentSet.tagNames.push(tag.name)
+        currentSet.tagColorMap = currentSet.tagColorMap || {}
+        currentSet.tagColorMap[tagId] = tag.color
+      }
+    })
+    ;(mistake.all_question_tags || []).forEach(tag => {
+      const tagId = String(tag.id)
+      if (!currentSet.tagIds.includes(tagId)) {
+        currentSet.tagIds.push(tagId)
+        currentSet.tagNames.push(tag.name)
+        currentSet.tagColorMap = currentSet.tagColorMap || {}
+        currentSet.tagColorMap[tagId] = tag.color
+      }
+    })
+    ;(mistake.question_set_tags || []).forEach(tag => {
+      const tagId = String(tag.id)
+      if (!currentSet.tagIds.includes(tagId)) {
+        currentSet.tagIds.push(tagId)
+        currentSet.tagNames.push(tag.name)
+        currentSet.tagColorMap = currentSet.tagColorMap || {}
+        currentSet.tagColorMap[tagId] = tag.color
+      }
+    })
+    ;(question.tags || []).forEach(tag => {
+      const tagId = String(tag.id)
+      if (!currentSet.tagIds.includes(tagId)) {
+        currentSet.tagIds.push(tagId)
+        currentSet.tagNames.push(tag.name)
+        currentSet.tagColorMap = currentSet.tagColorMap || {}
+        currentSet.tagColorMap[tagId] = tag.color
+      }
+    })
+    if (mistake.added_at && new Date(mistake.added_at) > new Date(currentSet.createTime)) {
+      currentSet.createTime = mistake.added_at
+    }
+  })
+
+  return Array.from(setMap.values()).map(set => {
+    const matchedTag = tagOptions.value.find(tag => set.tagIds.includes(String(tag.id)))
+    const primaryColor = matchedTag?.color || set.tagColorMap?.[set.tagIds[0]] || '#909399'
+    const masteredCount = set.masteredCount || 0
+    const pendingCount = set.questionCount - masteredCount
+    const status = pendingCount === 0 ? 'mastered' : calcSetStatus(set.questionCount, set.createTime)
+    return {
+      ...set,
+      primaryTagName: matchedTag?.name || set.tagNames[0] || '未打标签',
+      primaryTagColor: primaryColor,
+      status
+    }
+  })
+}
+
+const loadTags = async () => {
+  try {
+    const response = await getTagList()
+    tagOptions.value = normalizeTagResponse(response)
+  } catch (error) {
+    console.error('加载知识标签失败:', error)
+    tagOptions.value = []
   }
-])
+}
+
+const loadMistakeSets = async () => {
+  try {
+    loading.value = true
+    const response = await getMistakes()
+    console.log('[DEBUG] 接收到的原始错题数据:', response)
+    const mistakes = Array.isArray(response) ? response : []
+    wrongQuestionSets.value = buildQuestionSetBasedSets(mistakes)
+  } catch (error) {
+    console.error('加载错题集失败:', error)
+    ElMessage.error('加载错题集失败')
+    wrongQuestionSets.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(async () => {
+  await loadTags()
+  await loadMistakeSets()
+})
 
 // 统计计算
 const totalQuestions = computed(() => 
@@ -209,8 +285,8 @@ const filteredSets = computed(() => {
     )
   }
   
-  if (filter.value.subject) {
-    result = result.filter(set => set.subject === filter.value.subject)
+  if (filter.value.tagId) {
+    result = result.filter(set => set.tagIds.includes(filter.value.tagId))
   }
   
   switch (filter.value.sortBy) {
@@ -227,28 +303,6 @@ const filteredSets = computed(() => {
   
   return result
 })
-
-const getSubjectType = (subject) => {
-  const types = {
-    math: '',
-    chinese: 'success',
-    english: 'warning',
-    physics: 'danger',
-    chemistry: 'info'
-  }
-  return types[subject] || ''
-}
-
-const getSubjectName = (subject) => {
-  const names = {
-    math: '数学',
-    chinese: '语文',
-    english: '英语',
-    physics: '物理',
-    chemistry: '化学'
-  }
-  return names[subject] || subject
-}
 
 const getStatusType = (status) => {
   const types = {
@@ -281,15 +335,15 @@ const formatDate = (dateStr) => {
 }
 
 const handleSearch = () => {
-  // 搜索逻辑已通过计算属性实现
 }
 
 const viewSetDetail = (set) => {
+  sessionStorage.setItem('currentWrongSet', JSON.stringify(set))
   router.push(`/wrong-questions/set/${set.id}`)
 }
 
 const createNewSet = () => {
-  ElMessage.info('创建新错题集功能开发中...')
+  ElMessage.info('错题集按知识标签自动归类，无需手动创建')
 }
 </script>
 

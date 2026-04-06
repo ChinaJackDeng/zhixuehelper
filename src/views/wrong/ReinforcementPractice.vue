@@ -29,104 +29,127 @@
     <div class="practice-content">
       <!-- 左侧：练习区域 -->
       <div class="practice-panel">
-        <div class="progress-bar">
-          <el-progress 
-            :percentage="progress" 
-            :color="progressColor"
-            :stroke-width="8"
-            :show-text="false"
-          />
-          <span class="progress-text">{{ progress }}%</span>
+        <div v-if="!currentQuestion" class="empty-state">
+          <el-empty description="暂无题目">
+            <el-button type="primary" @click="goBack">返回错题本</el-button>
+          </el-empty>
         </div>
-
-        <div class="question-card">
-          <div class="question-header">
-            <el-tag :type="getSubjectType(currentQuestion.subject)" size="large">
-              {{ getSubjectName(currentQuestion.subject) }}
-            </el-tag>
-            <el-tag type="info" size="large">
-              {{ currentQuestion.difficulty === 'easy' ? '简单' : currentQuestion.difficulty === 'medium' ? '中等' : '困难' }}
-            </el-tag>
+        
+        <div v-else>
+          <div class="progress-bar">
+            <el-progress 
+              :percentage="progress" 
+              :color="progressColor"
+              :stroke-width="8"
+              :show-text="false"
+            />
+            <span class="progress-text">{{ progress }}%</span>
           </div>
 
-          <div class="question-content">
-            <h2 class="question-title">{{ currentQuestion.title }}</h2>
-            <div class="question-body">
-              {{ currentQuestion.content }}
-            </div>
-
-            <div class="question-options" v-if="currentQuestion.options">
-              <div 
-                v-for="(option, index) in currentQuestion.options" 
-                :key="index"
-                class="option-item"
-                :class="{ 
-                  'selected': selectedAnswer === index,
-                  'correct': showResult && index === currentQuestion.correctAnswer,
-                  'wrong': showResult && selectedAnswer === index && index !== currentQuestion.correctAnswer
-                }"
-                @click="selectOption(index)"
+          <div class="question-card">
+            <div class="question-header">
+              <div class="header-left-group">
+                <el-tag type="info" size="large">
+                  {{ getQuestionTypeLabel(currentQuestion.type) }}
+                </el-tag>
+                <el-tag type="info" size="large">
+                  {{ currentQuestion.difficulty === 'easy' ? '简单' : currentQuestion.difficulty === 'medium' ? '中等' : '困难' }}
+                </el-tag>
+              </div>
+              <el-button 
+                type="danger" 
+                size="small" 
+                @click="removeFromReinforcement"
+                :disabled="showResult"
+                class="remove-btn"
               >
-                <span class="option-label">{{ String.fromCharCode(65 + index) }}.</span>
-                <span class="option-text">{{ option }}</span>
-                <el-icon v-if="showResult && index === currentQuestion.correctAnswer" class="check-icon"><CircleCheck /></el-icon>
-                <el-icon v-if="showResult && selectedAnswer === index && index !== currentQuestion.correctAnswer" class="close-icon"><CircleClose /></el-icon>
-              </div>
+                <el-icon><Delete /></el-icon>
+                移出强化练习
+              </el-button>
             </div>
-          </div>
 
-          <div class="result-feedback" v-if="showResult">
-            <div class="feedback-header" :class="{ correct: isCorrect, wrong: !isCorrect }">
-              <el-icon class="feedback-icon">
-                <CircleCheck v-if="isCorrect" />
-                <CircleClose v-else />
-              </el-icon>
-              <span class="feedback-text">{{ isCorrect ? '回答正确！' : '回答错误' }}</span>
-            </div>
-            <div class="feedback-content" v-if="!isCorrect">
-              <div class="feedback-item">
-                <span class="feedback-label">正确答案：</span>
-                <span class="feedback-value">{{ String.fromCharCode(65 + currentQuestion.correctAnswer) }}</span>
+            <div class="question-content">
+              <h2 class="question-title">{{ currentQuestion.title }}</h2>
+              <div class="question-body">
+                {{ currentQuestion.content }}
               </div>
-              <div class="feedback-analysis">
-                <h4>解析：</h4>
-                <p>{{ currentQuestion.analysis }}</p>
-              </div>
-            </div>
-          </div>
 
-          <div class="action-buttons">
-            <el-button 
-              v-if="!showResult" 
-              type="primary" 
-              size="large" 
-              @click="submitAnswer"
-              :disabled="selectedAnswer === null"
-              class="submit-btn"
-            >
-              <el-icon><Check /></el-icon>
-              提交答案
-            </el-button>
-            <el-button 
-              v-else 
-              type="primary" 
-              size="large" 
-              @click="nextQuestion"
-              class="next-btn"
-            >
-              <el-icon><ArrowRight /></el-icon>
-              {{ currentIndex === totalQuestions - 1 ? '完成练习' : '下一题' }}
-            </el-button>
-            <el-button size="large" @click="skipQuestion" :disabled="showResult">
-              <el-icon><DArrowRight /></el-icon>
-              跳过
-            </el-button>
+              <div class="question-options" v-if="currentQuestion.options && currentQuestion.options.length > 0">
+                <div 
+                  v-for="(option, index) in currentQuestion.options" 
+                  :key="index"
+                  class="option-item"
+                  :class="{ 
+                    'selected': selectedAnswer === index,
+                    'correct': showResult && index === currentQuestion.correctAnswer,
+                    'wrong': showResult && selectedAnswer === index && index !== currentQuestion.correctAnswer
+                  }"
+                  @click="selectOption(index)"
+                >
+                  <span class="option-label">{{ String.fromCharCode(65 + index) }}.</span>
+                  <span class="option-text">{{ option }}</span>
+                  <el-icon v-if="showResult && index === currentQuestion.correctAnswer" class="check-icon"><CircleCheck /></el-icon>
+                  <el-icon v-if="showResult && selectedAnswer === index && index !== currentQuestion.correctAnswer" class="close-icon"><CircleClose /></el-icon>
+                </div>
+              </div>
+              <div v-else class="no-options-block">
+                该题暂无可选项，请跳过或重新生成题目
+              </div>
+            </div>
+
+            <div class="result-feedback" v-if="showResult">
+              <div class="feedback-header" :class="{ correct: isCorrect, wrong: !isCorrect }">
+                <el-icon class="feedback-icon">
+                  <CircleCheck v-if="isCorrect" />
+                  <CircleClose v-else />
+                </el-icon>
+                <span class="feedback-text">{{ isCorrect ? '回答正确！' : '回答错误' }}</span>
+              </div>
+              <div class="feedback-content" v-if="!isCorrect">
+                <div class="feedback-item">
+                  <span class="feedback-label">正确答案：</span>
+                  <span class="feedback-value">{{ formatAnswerDisplay(resolveQuestionCorrectAnswer(currentQuestion)) }}</span>
+                </div>
+                <div class="feedback-analysis">
+                  <h4>解析：</h4>
+                  <p>{{ currentQuestion.analysis }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="action-buttons">
+              <el-button 
+                v-if="!showResult" 
+                type="primary" 
+                size="large" 
+                @click="submitAnswer"
+                :disabled="selectedAnswer === null || !(currentQuestion.options && currentQuestion.options.length > 0)"
+                class="submit-btn"
+              >
+                <el-icon><Check /></el-icon>
+                提交答案
+              </el-button>
+              <el-button 
+                v-else 
+                type="primary" 
+                size="large" 
+                @click="nextQuestion"
+                class="next-btn"
+              >
+                <el-icon><ArrowRight /></el-icon>
+                {{ currentIndex === totalQuestions - 1 ? '完成练习' : '下一题' }}
+              </el-button>
+              <el-button size="large" @click="skipQuestion" :disabled="showResult">
+                <el-icon><DArrowRight /></el-icon>
+                跳过
+              </el-button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- 右侧：学习路径和统计 -->
-      <div class="side-panel">
+      <div v-if="currentQuestion" class="side-panel">
         <div class="learning-path-card">
           <div class="card-header">
             <el-icon class="card-icon"><TrendCharts /></el-icon>
@@ -148,7 +171,7 @@
               <div class="path-info">
                 <div class="path-title">{{ q.title }}</div>
                 <div class="path-meta">
-                  <span>{{ getSubjectName(q.subject) }}</span>
+                  <span>{{ getQuestionTypeLabel(q.type) }}</span>
                   <span>•</span>
                   <span>{{ q.difficulty === 'easy' ? '简单' : q.difficulty === 'medium' ? '中等' : '困难' }}</span>
                 </div>
@@ -220,7 +243,7 @@
           </div>
           <div class="suggestion-content">
             <div class="suggestion-item">
-              <el-icon class="suggestion-icon"><Lightbulb /></el-icon>
+              <el-icon class="suggestion-icon"><Opportunity /></el-icon>
               <p>{{ aiSuggestion }}</p>
             </div>
           </div>
@@ -264,7 +287,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { createReinforcementAttempt, deleteReinforcementQuestion } from '@/api/exam'
 import {
   ArrowLeft,
   ArrowRight,
@@ -277,9 +301,10 @@ import {
   DataAnalysis,
   Collection,
   ChatDotRound,
-  Lightbulb,
+  Opportunity,
   Clock,
-  Warning
+  Warning,
+  Delete
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -294,6 +319,7 @@ const questions = ref([
     id: 1,
     title: '二次函数的顶点坐标公式',
     subject: 'math',
+    type: 'single',
     content: '已知二次函数 y = ax² + bx + c (a ≠ 0)，求其顶点坐标。',
     options: [
       '(-b/2a, c - b²/4a)',
@@ -310,6 +336,7 @@ const questions = ref([
     id: 2,
     title: '牛顿第二定律的应用',
     subject: 'physics',
+    type: 'single',
     content: '一个质量为 2kg 的物体，在水平面上受到 10N 的水平拉力作用，物体与水平面间的摩擦系数为 0.2，求物体的加速度。（g = 10m/s²）',
     options: [
       '3 m/s²',
@@ -326,6 +353,7 @@ const questions = ref([
     id: 3,
     title: '英语定语从句的用法',
     subject: 'english',
+    type: 'single',
     content: 'The book _____ I bought yesterday is very interesting.',
     options: [
       'which',
@@ -342,6 +370,7 @@ const questions = ref([
     id: 4,
     title: '化学方程式的配平',
     subject: 'chemistry',
+    type: 'single',
     content: '配平化学方程式：Fe₂O₃ + CO → Fe + CO₂',
     options: [
       'Fe₂O₃ + 3CO → 2Fe + 3CO₂',
@@ -358,6 +387,7 @@ const questions = ref([
     id: 5,
     title: '古诗词鉴赏技巧',
     subject: 'chinese',
+    type: 'single',
     content: '下列哪项不属于古诗词的修辞手法？',
     options: [
       '比喻',
@@ -372,37 +402,48 @@ const questions = ref([
   }
 ])
 
-const knowledgePoints = ref([
-  { name: '二次函数', mastery: 75 },
-  { name: '牛顿第二定律', mastery: 60 },
-  { name: '定语从句', mastery: 85 },
-  { name: '化学方程式', mastery: 45 },
-  { name: '古诗词', mastery: 70 }
-])
-
-const aiSuggestion = ref('根据您的练习情况，建议重点复习"化学方程式的配平"和"牛顿第二定律的应用"这两个知识点，正确率相对较低。')
-
-const currentQuestion = computed(() => questions.value[currentIndex.value])
+const currentQuestion = computed(() => {
+  if (questions.value.length === 0 || currentIndex.value >= questions.value.length) {
+    return null
+  }
+  return questions.value[currentIndex.value]
+})
 const totalQuestions = computed(() => questions.value.length)
+const completedCount = computed(() => {
+  return questions.value.filter(q => q.userAnswer !== null || q.skipped).length
+})
 const correctCount = computed(() => {
-  return questions.value.filter((q, i) => i < currentIndex.value && q.userAnswer === q.correctAnswer).length
+  return questions.value.filter((q) => q.userAnswer !== null && isAnswerCorrect(q.userAnswer, q.correctAnswer, q.type)).length
 })
 const accuracy = computed(() => {
-  const answered = questions.value.filter((q, i) => i < currentIndex.value).length
+  const answered = questions.value.filter((q) => q.userAnswer !== null).length
   if (answered === 0) return 0
   return Math.round((correctCount.value / answered) * 100)
 })
-const progress = computed(() => Math.round(((currentIndex.value) / totalQuestions.value) * 100))
+const progress = computed(() => {
+  if (totalQuestions.value === 0) return 0
+  return Math.round((completedCount.value / totalQuestions.value) * 100)
+})
 const progressColor = computed(() => {
   if (accuracy.value >= 80) return '#67c23a'
   if (accuracy.value >= 60) return '#e6a23c'
   return '#f56c6c'
 })
-const isCorrect = computed(() => selectedAnswer.value === currentQuestion.value.correctAnswer)
+const isCorrect = computed(() => isAnswerCorrect(
+  selectedAnswer.value,
+  resolveQuestionCorrectAnswer(currentQuestion.value),
+  currentQuestion.value.type
+))
 
-const pendingCount = computed(() => questions.value.filter(q => q.mastery < 30).length)
-const practicingCount = computed(() => questions.value.filter(q => q.mastery >= 30 && q.mastery < 80).length)
-const masteredCount = computed(() => questions.value.filter(q => q.mastery >= 80).length)
+const pendingCount = computed(() => {
+  return questions.value.filter(q => q.userAnswer === null && !q.skipped).length
+})
+const practicingCount = computed(() => {
+  return questions.value.filter(q => q.skipped || (q.userAnswer !== null && q.userAnswer !== q.correctAnswer)).length
+})
+const masteredCount = computed(() => {
+  return questions.value.filter(q => q.userAnswer !== null && q.userAnswer === q.correctAnswer).length
+})
 
 const pendingPercentage = computed(() => {
   if (totalQuestions.value === 0) return 0
@@ -417,26 +458,55 @@ const masteredPercentage = computed(() => {
   return Math.round((masteredCount.value / totalQuestions.value) * 100)
 })
 
-const getSubjectType = (subject) => {
-  const types = {
-    math: '',
-    chinese: 'success',
-    english: 'warning',
-    physics: 'danger',
-    chemistry: 'info'
-  }
-  return types[subject] || ''
-}
+const knowledgePoints = computed(() => {
+  const pointMap = new Map()
+  questions.value.forEach((question, index) => {
+    const candidates = Array.isArray(question.knowledgePoints) && question.knowledgePoints.length > 0
+      ? question.knowledgePoints
+      : [inferKnowledgePoint(question.title, index)]
+    candidates.forEach((name) => {
+      const key = String(name || '').trim() || `知识点${index + 1}`
+      if (!pointMap.has(key)) {
+        pointMap.set(key, { name: key, score: 0, count: 0 })
+      }
+      const item = pointMap.get(key)
+      const statusScore = question.userAnswer === null
+        ? 45
+        : question.userAnswer === question.correctAnswer
+          ? 88
+          : 58
+      const adjustedScore = question.skipped ? Math.max(30, statusScore - 20) : statusScore
+      item.score += adjustedScore
+      item.count += 1
+    })
+  })
+  return Array.from(pointMap.values()).map(item => ({
+    name: item.name,
+    mastery: Math.round(item.score / item.count)
+  }))
+})
 
-const getSubjectName = (subject) => {
-  const names = {
-    math: '数学',
-    chinese: '语文',
-    english: '英语',
-    physics: '物理',
-    chemistry: '化学'
+const aiSuggestion = computed(() => {
+  const sortedPoints = [...knowledgePoints.value].sort((a, b) => a.mastery - b.mastery)
+  const weakPoint = sortedPoints[0]?.name || '薄弱知识点'
+  if (accuracy.value >= 80) {
+    return `保持稳定节奏，继续巩固${weakPoint}并做限时训练。`
   }
-  return names[subject] || subject
+  if (accuracy.value >= 60) {
+    return `优先复盘${weakPoint}错因，按题型再做两轮针对练习。`
+  }
+  return `先精练${weakPoint}基础题，再逐步提升综合应用能力。`
+})
+
+const getQuestionTypeLabel = (type) => {
+  const labels = {
+    single: '单选题',
+    multiple: '多选题',
+    judge: '判断题',
+    fill: '填空题',
+    essay: '问答题'
+  }
+  return labels[type] || '单选题'
 }
 
 const getProgressColor = (percentage) => {
@@ -445,26 +515,100 @@ const getProgressColor = (percentage) => {
   return '#f56c6c'
 }
 
+const normalizeAnswerValue = (value, type = 'single') => {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) return value.map(item => normalizeAnswerValue(item, type)).filter(item => item !== null)
+  if (type === 'fill' || type === 'essay') return String(value).trim().toLowerCase()
+  if (typeof value === 'number') return value
+  if (typeof value === 'boolean') return value ? 1 : 0
+  const text = String(value).trim()
+  if (!text) return null
+  if (/^\d+$/.test(text)) return Number(text)
+  const upper = text.toUpperCase()
+  if (upper === 'TRUE') return 1
+  if (upper === 'FALSE') return 0
+  const charCode = upper.charCodeAt(0)
+  if (charCode >= 65 && charCode <= 90) return charCode - 65
+  return upper.toLowerCase()
+}
+
+const isAnswerCorrect = (userAnswer, correctAnswer, type = 'single') => {
+  const normalizedUser = normalizeAnswerValue(userAnswer, type)
+  const normalizedCorrect = normalizeAnswerValue(correctAnswer, type)
+  if (Array.isArray(normalizedUser) || Array.isArray(normalizedCorrect)) {
+    if (!Array.isArray(normalizedUser) || !Array.isArray(normalizedCorrect)) return false
+    const userSorted = [...normalizedUser].sort().join(',')
+    const correctSorted = [...normalizedCorrect].sort().join(',')
+    return userSorted === correctSorted
+  }
+  return normalizedUser === normalizedCorrect
+}
+
+const inferCorrectAnswerFromAnalysis = (analysisText = '') => {
+  const text = String(analysisText || '')
+  if (!text) return null
+  const match = text.match(/(?:正确答案|答案)\s*[：:]\s*([A-Z])/i)
+  if (!match || !match[1]) return null
+  return normalizeAnswerValue(match[1], 'single')
+}
+
+const resolveQuestionCorrectAnswer = (question = {}) => {
+  const directAnswer = normalizeAnswerValue(question.correctAnswer, question.type || 'single')
+  if (directAnswer !== null) return directAnswer
+  const inferred = inferCorrectAnswerFromAnalysis(question.analysis || '')
+  if (inferred !== null) return inferred
+  return null
+}
+
+const formatAnswerDisplay = (answer) => {
+  if (answer === null || answer === undefined || answer === '') return '暂无'
+  if (Array.isArray(answer)) {
+    return answer.map(item => formatAnswerDisplay(item)).join('、')
+  }
+  if (typeof answer === 'number') return String.fromCharCode(65 + answer)
+  if (typeof answer === 'boolean') return answer ? '正确' : '错误'
+  const text = String(answer).trim()
+  if (!text) return '暂无'
+  const upper = text.toUpperCase()
+  if (/^\d+$/.test(upper)) return String.fromCharCode(65 + Number(upper))
+  if (upper === 'TRUE') return '正确'
+  if (upper === 'FALSE') return '错误'
+  if (/^[A-Z]$/.test(upper)) return upper
+  return text
+}
+
 const selectOption = (index) => {
   if (showResult.value) return
   selectedAnswer.value = index
 }
 
-const submitAnswer = () => {
+const submitAnswer = async () => {
   if (selectedAnswer.value === null) {
     ElMessage.warning('请先选择答案')
     return
   }
   
-  questions.value[currentIndex.value].userAnswer = selectedAnswer.value
+  const current = questions.value[currentIndex.value]
+  current.userAnswer = selectedAnswer.value
+  current.skipped = false
   showResult.value = true
   
   if (isCorrect.value) {
-    questions.value[currentIndex.value].mastery = Math.min(100, questions.value[currentIndex.value].mastery + 20)
     ElMessage.success('回答正确！')
   } else {
-    questions.value[currentIndex.value].mastery = Math.max(0, questions.value[currentIndex.value].mastery - 10)
     ElMessage.error('回答错误')
+  }
+
+  if (current.reinforcementQuestionId) {
+    try {
+      await createReinforcementAttempt({
+        reinforcement_question_id: current.reinforcementQuestionId,
+        user_answer: selectedAnswer.value,
+        is_correct: isCorrect.value
+      })
+    } catch (error) {
+      console.error('保存强化练习作答失败:', error)
+    }
   }
 }
 
@@ -480,22 +624,62 @@ const nextQuestion = () => {
 
 const skipQuestion = () => {
   questions.value[currentIndex.value].skipped = true
+  showResult.value = false
   if (currentIndex.value < totalQuestions.value - 1) {
     currentIndex.value++
     selectedAnswer.value = null
+  } else {
+    showCompleteDialog.value = true
   }
 }
 
 const jumpToQuestion = (index) => {
-  if (index < currentIndex.value) {
+  if (index <= currentIndex.value) {
     currentIndex.value = index
-    selectedAnswer.value = questions.value[index].userAnswer
-    showResult.value = true
+    selectedAnswer.value = questions.value[index].userAnswer ?? null
+    showResult.value = questions.value[index].userAnswer !== null
   }
 }
 
 const goBack = () => {
   router.back()
+}
+
+const removeFromReinforcement = async () => {
+  const current = questions.value[currentIndex.value]
+  if (!current.reinforcementQuestionId) {
+    ElMessage.warning('无法移出该题目')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '确定要将这道题移出强化练习吗？',
+      '移出确认',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await deleteReinforcementQuestion(current.reinforcementQuestionId)
+    ElMessage.success('已移出强化练习')
+    questions.value.splice(currentIndex.value, 1)
+    if (questions.value.length === 0) {
+      router.back()
+      return
+    }
+    if (currentIndex.value >= questions.value.length) {
+      currentIndex.value = questions.value.length - 1
+    }
+    selectedAnswer.value = null
+    showResult.value = false
+    sessionStorage.setItem('reinforcementPracticeQuestions', JSON.stringify(questions.value))
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('移出强化练习失败:', error)
+      ElMessage.error('移出强化练习失败')
+    }
+  }
 }
 
 const restartPractice = () => {
@@ -509,8 +693,44 @@ const restartPractice = () => {
   showCompleteDialog.value = false
 }
 
+function inferKnowledgePoint(title, index) {
+  const plainTitle = String(title || '').replace(/\s+/g, '')
+  if (!plainTitle) return `知识点${index + 1}`
+  return plainTitle.slice(0, Math.min(8, plainTitle.length))
+}
+
 onMounted(() => {
-  console.log('开始强化练习')
+  const storedQuestions = sessionStorage.getItem('reinforcementPracticeQuestions')
+  if (!storedQuestions) return
+  try {
+    const parsed = JSON.parse(storedQuestions)
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      questions.value = parsed.map((item, index) => {
+        const normalizedType = item.type || 'single'
+        const normalizedCorrectAnswer = normalizeAnswerValue(
+          item.correctAnswer ?? item.answer ?? item.answerRaw ?? item.correct_answer,
+          normalizedType
+        )
+        return {
+          id: item.id || index + 1,
+          reinforcementQuestionId: item.reinforcementQuestionId || null,
+          title: item.title || `练习题 ${index + 1}`,
+          subject: item.subject || 'math',
+          type: normalizedType,
+          content: item.content || item.title || '',
+          options: Array.isArray(item.options) ? item.options : [],
+          correctAnswer: normalizedCorrectAnswer ?? inferCorrectAnswerFromAnalysis(item.analysis || ''),
+          difficulty: item.difficulty || 'medium',
+          analysis: item.analysis || '',
+          knowledgePoints: Array.isArray(item.knowledgePoints) ? item.knowledgePoints : [],
+          skipped: false,
+          userAnswer: null
+        }
+      })
+    }
+  } catch (error) {
+    console.error('读取强化练习题失败:', error)
+  }
 })
 </script>
 
@@ -607,6 +827,13 @@ onMounted(() => {
   padding-right: 4px;
 }
 
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
 .side-panel {
   flex: 0 0 35%;
   display: flex;
@@ -646,9 +873,15 @@ onMounted(() => {
 
 .question-header {
   display: flex;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
   padding: 16px 20px;
   border-bottom: 1px solid var(--el-border-color);
+}
+
+.header-left-group {
+  display: flex;
+  gap: 12px;
 }
 
 .question-content {
@@ -675,6 +908,14 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.no-options-block {
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter);
 }
 
 .option-item {

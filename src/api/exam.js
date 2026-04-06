@@ -323,7 +323,31 @@ export function saveExamState(data) {
 export function restoreExamState(questionSetId) {
   return service({
     url: `/exam/exams/restore-state/${questionSetId}`,
-    method: 'get'
+    method: 'get',
+    silentError: true
+  })
+}
+
+/**
+ * 删除题集
+ * @param {number} questionSetId - 题集 ID
+ */
+export function deleteQuestionSet(questionSetId) {
+  return service({
+    url: `/exam/question-sets/${questionSetId}`,
+    method: 'delete'
+  })
+}
+
+/**
+ * 清除考试状态
+ * @param {number} questionSetId - 题集 ID
+ */
+export function clearExamState(questionSetId) {
+  return service({
+    url: `/exam/exams/clear-state/${questionSetId}`,
+    method: 'delete',
+    silentError: true
   })
 }
 
@@ -389,5 +413,155 @@ export function checkExamModeSwitch(data) {
     url: '/exam/exams/check-switch',
     method: 'post',
     data: data
+  })
+}
+
+// ==================== 错题集接口 ====================
+
+/**
+ * 添加错题
+ * @param {Object} data - 请求数据
+ * @param {number} data.question_id - 题目 ID
+ * @param {number} data.question_set_id - 来源题集 ID
+ * @param {Object} data.user_answer - 用户的错误答案
+ */
+export function addMistake(data) {
+  return service({
+    url: '/exam/mistakes',
+    method: 'post',
+    data: data
+  })
+}
+
+/**
+ * 批量添加错题
+ * @param {Object} data - 请求数据
+ * @param {Array} data.questions - 错题列表 [{question_id, question_set_id, user_answer}, ...]
+ */
+export function batchAddMistakes(data) {
+  return service({
+    url: '/exam/mistakes/batch',
+    method: 'post',
+    data: data
+  })
+}
+
+/**
+ * 获取用户的错题列表
+ * @param {number} questionSetId - 题集 ID（可选）
+ * @returns {Promise} 包含错题列表的响应
+ */
+export function getMistakes(questionSetId) {
+  return service({
+    url: '/exam/mistakes',
+    method: 'get',
+    params: questionSetId ? { question_set_id: questionSetId } : undefined
+  })
+}
+
+/**
+ * 从错题集移除题目
+ * @param {number} questionId - 题目 ID
+ * @param {number} questionSetId - 题集 ID（可选）
+ */
+export function removeMistake(questionId, questionSetId) {
+  return service({
+    url: `/exam/mistakes/${questionId}`,
+    method: 'delete',
+    params: questionSetId ? { question_set_id: questionSetId } : undefined
+  })
+}
+
+/**
+ * 获取错题详情
+ * @param {number} mistakeId - 错题 ID
+ * @returns {Promise} 包含错题详情的响应
+ */
+export function getMistakeDetail(mistakeId) {
+  return service({
+    url: `/exam/mistakes/${mistakeId}`,
+    method: 'get'
+  })
+}
+
+/**
+ * 重新生成错题 AI 解析
+ * @param {number} mistakeId - 错题 ID
+ * @returns {Promise} 包含 AI 解析结果的响应
+ */
+export function regenerateMistakeAnalysis(mistakeId) {
+  return service({
+    url: `/exam/mistakes/${mistakeId}/regenerate-analysis`,
+    method: 'post'
+  })
+}
+
+export function markMistakeMastered(mistakeId) {
+  return service({
+    url: `/exam/mistakes/${mistakeId}/mastered`,
+    method: 'post'
+  })
+}
+
+export function getRelatedDocuments(params = {}) {
+  return service({
+    url: '/exam/documents/related',
+    method: 'get',
+    params: params
+  })
+}
+
+export function getRelatedQuestions(params = {}) {
+  return service({
+    url: '/exam/questions/related',
+    method: 'get',
+    params: params
+  })
+}
+
+export function startReinforcement(data) {
+  return service({
+    url: '/exam/reinforcement',
+    method: 'post',
+    data: data
+  })
+}
+
+export function selectReinforcementQuestion(reinforcementQuestionId, selected = true) {
+  return service({
+    url: `/exam/reinforcement/questions/${reinforcementQuestionId}/select`,
+    method: 'post',
+    data: { selected }
+  })
+}
+
+export function getReinforcementSessionQuestions(sessionId, params = {}) {
+  return service({
+    url: `/exam/reinforcement/sessions/${sessionId}/questions`,
+    method: 'get',
+    params
+  })
+}
+
+export function addReinforcementQuestion(mistakeId, data) {
+  return service({
+    url: `/exam/reinforcement/mistakes/${mistakeId}/questions`,
+    method: 'post',
+    data
+  })
+}
+
+export function deleteReinforcementQuestion(reinforcementQuestionId) {
+  return service({
+    url: `/exam/reinforcement/questions/${reinforcementQuestionId}`,
+    method: 'delete'
+  })
+}
+
+export function createReinforcementAttempt(data) {
+  return service({
+    url: '/exam/reinforcement/attempts',
+    method: 'post',
+    data
   })
 }

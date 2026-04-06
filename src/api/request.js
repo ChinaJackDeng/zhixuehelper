@@ -48,10 +48,13 @@ service.interceptors.request.use(
 
         // 开发环境日志
         if (import.meta?.env?.DEV || process?.env?.NODE_ENV === 'development') {
-            console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`, {
-                params: config.params,
-                data: config.data
-            })
+            const requestLog = {}
+            if (config.params !== undefined) requestLog.params = config.params
+            if (config.data !== undefined) requestLog.data = config.data
+            console.log(
+                `[API] ${config.method?.toUpperCase()} ${config.url}`,
+                Object.keys(requestLog).length > 0 ? requestLog : ''
+            )
         }
 
         return config
@@ -139,8 +142,10 @@ service.interceptors.response.use(
             errorMsg = '请求参数验证失败'
         }
 
-        console.error('Response Error:', error)
-        ElMessage.error(errorMsg)
+        if (!error.config?.silentError) {
+            console.error('Response Error:', error)
+            ElMessage.error(errorMsg)
+        }
 
         return Promise.reject(error)
     }

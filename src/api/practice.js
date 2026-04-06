@@ -1,27 +1,69 @@
-import request from './request'
+/**
+ * 考试功能相关 API 调用
+ * 此文件已废弃，所有接口已迁移到 exam.js
+ * 请使用 import { xxx } from '@/api/exam'
+ */
+
+import * as examApi from './exam'
 
 export default {
-    // 📦 获取题目集详情
-    getQuestionSet: (setId) => request.get(`/practice/sets/${setId}`),
+  // 题集相关 - 重新映射到正确路径
+  getQuestionSet: examApi.getQuestionSetDetail,
+  getQuestionSets: examApi.getQuestionSets,
+  getQuestionSetDetail: examApi.getQuestionSetDetail,
+  getQuestionSetQuestions: examApi.getQuestionSetQuestions,
 
-    // 💾 保存单题答案（练习模式即时保存）
-    saveAnswer: (data) => request.post('/practice/answers', data),
+  // 练习进度 - 重新映射到正确路径
+  saveAnswer: examApi.savePracticeProgress,
+  savePracticeProgress: examApi.savePracticeProgress,
+  getPracticeProgress: examApi.getPracticeProgress,
 
-    // 📝 批量提交答案（考试交卷）
-    submit: (data) => request.post('/practice/submit', data),
+  // 考试相关 - 重新映射到正确路径
+  submit: examApi.submitExam,
+  submitExam: examApi.submitExam,
+  getExamReport: examApi.getExamReport,
+  getReport: examApi.getExamReport,
+  getExamHistory: examApi.getExamHistory,
 
-    // 📊 获取练习报告
-    getReport: (practiceId) => request.get(`/practice/${practiceId}/report`),
+  // 考试状态
+  saveExamState: examApi.saveExamState,
+  restoreExamState: examApi.restoreExamState,
+  clearExamState: examApi.clearExamState,
+  startExam: examApi.startExamWithConfig,
+  checkExamModeSwitch: examApi.checkExamModeSwitch,
 
-    // 📚 获取已完成的练习记录
-    getCompletedSets: (params = {}) => request.get('/practice/completed', { params }),
+  // 题目管理
+  getQuestionDetail: examApi.getQuestionDetail,
+  updateQuestion: examApi.updateQuestion,
 
-    // ✏️ 更新题目标记/备注
-    updateQuestion: (questionId, data) => request.put(`/practice/questions/${questionId}`, data),
+  // 题目生成
+  generateQuestions: examApi.generateQuestions,
+  getGenerationProgress: examApi.getGenerationProgress,
+  getTaskQuestions: examApi.getTaskQuestions,
+  getQuestionPreview: examApi.getQuestionPreview,
+  confirmSaveQuestions: examApi.confirmSaveQuestions,
+  cancelGeneration: examApi.cancelGeneration,
+  saveQuestions: examApi.saveQuestions,
 
-    // ➕ 将题目加入错题本
-    addToWrongBook: (questionId, data) => request.post(`/practice/wrong/${questionId}`, data),
+  // 错题相关 - 需要后端添加对应接口
+  /* eslint-disable-next-line no-unused-vars */
+  addToWrongBook: (...args) => {
+    console.warn('addToWrongBook 需要后端实现 /api/exam/mistakes 接口')
+    return { data: { code: 501, message: '接口开发中' } }
+  },
+  getWrongBook: () => {
+    console.warn('getWrongBook 需要后端实现 /api/exam/mistakes 接口')
+    return { data: { code: 501, message: '接口开发中' } }
+  },
+  /* eslint-disable-next-line no-unused-vars */
+  batchAddMistakes: (...args) => {
+    console.warn('batchAddMistakes 需要后端实现 /api/exam/mistakes/batch 接口')
+    return { data: { code: 501, message: '接口开发中' } }
+  },
 
-    // 📋 获取错题本列表
-    getWrongBook: (params = {}) => request.get('/practice/wrong', { params })
+  // 题库统计
+  getQuestionStatistics: examApi.getQuestionStatistics,
+
+  // 试卷生成
+  generatePaper: examApi.generatePaper
 }

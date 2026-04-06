@@ -9,10 +9,24 @@
           class="judge-group"
           @change="emit('update:modelValue', localValue)"
       >
-        <el-radio :label="true" class="judge-radio correct">
+        <el-radio
+            :label="true"
+            class="judge-radio"
+            :class="{
+              'correct-feedback': showFeedback && question.answer === true,
+              'wrong-feedback': showFeedback && question.answer === true && localValue === false
+            }"
+        >
           <el-icon><CircleCheckFilled /></el-icon> 正确
         </el-radio>
-        <el-radio :label="false" class="judge-radio wrong">
+        <el-radio
+            :label="false"
+            class="judge-radio"
+            :class="{
+              'wrong-feedback': showFeedback && question.answer === false,
+              'correct-feedback': showFeedback && question.answer === false && localValue === true
+            }"
+        >
           <el-icon><CircleCloseFilled /></el-icon> 错误
         </el-radio>
       </el-radio-group>
@@ -64,14 +78,16 @@ const localValue = computed({
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.judge-radio.correct {
+.judge-radio.correct-feedback {
   border-color: var(--color-success);
   color: var(--color-success);
+  background: linear-gradient(135deg, #f0f9eb 0%, #e8f5e9 100%);
 }
 
-.judge-radio.wrong {
+.judge-radio.wrong-feedback {
   border-color: var(--color-danger);
   color: var(--color-danger);
+  background: linear-gradient(135deg, #fef0f0 0%, #ffebee 100%);
 }
 
 .judge-radio :deep(.el-radio__label) {

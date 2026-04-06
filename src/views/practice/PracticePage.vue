@@ -183,7 +183,9 @@
             <el-button v-if="!showExplanationSplit" type="primary" @click="toggleExplanation">查看解析</el-button>
             <el-button v-else @click="toggleExplanation">收起解析</el-button>
             <el-button type="success" @click="checkAnswer" :icon="Finished">检查答案</el-button>
-            <el-button type="warning" @click="addToMistakes" :icon="Star">加入错题集</el-button>
+            <el-button type="warning" @click="addedMistakesSet.has(currentQuestion?.id) ? removeFromMistakes(currentQuestion.id) : addToMistakes()" :icon="Star">
+              {{ addedMistakesSet.has(currentQuestion?.id) ? '取消加入' : '加入错题集' }}
+            </el-button>
             <el-button type="info" @click="openReviewDialog" :icon="Edit">复核题目</el-button>
           </div>
         </div>
@@ -202,11 +204,13 @@
             <p>总题数：{{ questions.length }}</p>
             <p>已答对：{{ report.correctCount }}</p>
             <p>已答错：{{ report.wrongCount }}</p>
-            <p>得分：{{ report.score }} / {{ report.totalScore }}</p>
+            <p>得分：{{ formatQuestionCountScore(report.score, report.totalScore) }}</p>
             <p>用时：{{ report.timeUsed }} 秒</p>
             <div class="report-actions">
               <el-button type="primary" @click="viewAllExplanations">查看全部解析</el-button>
-              <el-button type="success" @click="addAllWrongToMistakes">批量加入错题集</el-button>
+              <el-button type="success" @click="addAllWrongToMistakes" :disabled="report.wrongCount === 0">
+                批量加入错题集{{ report.wrongCount > 0 ? `(${report.wrongCount})` : '' }}
+              </el-button>
             </div>
           </div>
         </div>
@@ -282,7 +286,7 @@
           <el-table-column prop="wrong_count" label="错误数" width="80" />
           <el-table-column label="得分" width="100">
             <template #default="{ row }">
-              {{ row.score }} / {{ row.total_score }}
+              {{ formatQuestionCountScore(row.correct_count, row.correct_count + row.wrong_count) }}
             </template>
           </el-table-column>
           <el-table-column label="用时" width="100">
@@ -344,11 +348,17 @@ import {
   updateQuestion,
   saveExamState,
   restoreExamState,
+  clearExamState,
+  deleteQuestionSet,
   getExamHistory,
   startExamWithConfig,
   getQuestionSetQuestions,
   checkExamModeSwitch,
-  getQuestionDetail
+  getQuestionDetail,
+  addMistake,
+  batchAddMistakes,
+  getMistakes,
+  removeMistake
 } from '@/api/exam'
 
 const sets = ref([])
@@ -367,6 +377,7 @@ const currentIndex = ref(0)
 const userAnswers = reactive({})
 const feedbackMap = reactive({})
 const correctMap = reactive({})
+const addedMistakesSet = reactive(new Set())
 const showExplanationSplit = ref(false)
 const showAllExplanations = ref(false)
 
@@ -388,6 +399,10 @@ const randomOrder = ref(false)
 
 const currentQuestion = computed(() => questions.value[currentIndex.value] || {})
 
+// 缓存相关变量
+const questionCache = reactive({})
+const CACHE_EXPIRY = 5 * 60 * 1000 // 5分钟缓存过期时间
+
 // 辅助函数：统一处理 API 响应结构
 function handleResponse(response, defaultValue = null) {
   if (!response) return defaultValue
@@ -395,6 +410,167 @@ function handleResponse(response, defaultValue = null) {
   if (response.data !== undefined) return response.data
   return response || defaultValue
 }
+
+function clearReactiveObject(target) {
+  Object.keys(target).forEach(key => delete target[key])
+}
+
+function resetAnswerState() {
+  clearReactiveObject(userAnswers)
+  clearReactiveObject(feedbackMap)
+  clearReactiveObject(correctMap)
+}
+
+function resetPracticeViewState(resetAllExplanations = false) {
+  showExplanationSplit.value = false
+  showReport.value = false
+  currentIndex.value = 0
+  examStarted.value = false
+  if (resetAllExplanations) {
+    showAllExplanations.value = false
+  }
+}
+
+function extractQuestionList(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.questions)) return data.questions
+  if (Array.isArray(data?.data?.questions)) return data.data.questions
+  return []
+}
+
+function filterValidQuestions(questionList) {
+  return questionList.filter(question => {
+    try {
+      validateQuestionData(question)
+      return true
+    } catch (error) {
+      console.warn('题目数据验证失败:', error.message)
+      return false
+    }
+  })
+}
+
+function getLoadQuestionErrorMessage(error) {
+  const message = error?.message || ''
+  if (message.includes('超时')) return '网络连接超时，请检查网络后重试'
+  if (message.includes('404')) return '题集不存在或已被删除'
+  if (message.includes('401')) return '登录已过期，请重新登录'
+  return '加载题目失败，请稍后重试'
+}
+
+async function clearPersistedExamState() {
+  if (!selectedSetId.value) return
+  try {
+    await clearExamState(selectedSetId.value)
+  } catch (error) {
+    try {
+      await saveExamState({
+        question_set_id: selectedSetId.value,
+        answers: {},
+        time_used: 0,
+        time_left: 0,
+        current_question_index: 0
+      })
+    } catch {
+      console.log('清除考试状态失败，继续流程')
+    }
+  }
+}
+
+// 增强的数据验证函数
+function validateQuestionData(question) {
+  if (!question || typeof question !== 'object') {
+    throw new Error('题目数据格式错误')
+  }
+  
+  const requiredFields = ['id', 'stem', 'type']
+  const missingFields = requiredFields.filter(field => !question[field])
+  
+  if (missingFields.length > 0) {
+    throw new Error(`题目数据缺少必要字段: ${missingFields.join(', ')}`)
+  }
+  
+  // 验证题型
+  const validTypes = ['single', 'multi', 'judge', 'fill', 'essay']
+  if (!validTypes.includes(question.type)) {
+    throw new Error(`无效的题型: ${question.type}`)
+  }
+  
+  // 验证选项格式
+  if (['single', 'multi'].includes(question.type)) {
+    if (!question.options || (typeof question.options === 'object' && Object.keys(question.options).length === 0)) {
+      throw new Error('选择题必须包含选项')
+    }
+  }
+  
+  return true
+}
+
+// 网络请求超时和重试机制
+async function apiRequestWithRetry(apiCall, maxRetries = 3, timeout = 10000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('请求超时')), timeout)
+      })
+      
+      const response = await Promise.race([apiCall(), timeoutPromise])
+      return response
+    } catch (error) {
+      console.warn(`API请求失败 (尝试 ${attempt}/${maxRetries}):`, error)
+      
+      if (attempt === maxRetries) {
+        throw error
+      }
+      
+      // 指数退避
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000))
+    }
+  }
+}
+
+// 缓存管理函数
+function getCachedQuestions(questionSetId) {
+  const cache = questionCache[questionSetId]
+  if (!cache) return null
+  
+  const now = Date.now()
+  if (now - cache.timestamp > CACHE_EXPIRY) {
+    // 缓存过期，删除
+    delete questionCache[questionSetId]
+    return null
+  }
+  
+  return cache.data
+}
+
+function setCachedQuestions(questionSetId, data) {
+  questionCache[questionSetId] = {
+    data: JSON.parse(JSON.stringify(data)), // 深拷贝
+    timestamp: Date.now()
+  }
+}
+
+// 清除缓存函数（备用）
+// function clearCache() {
+//   Object.keys(questionCache).forEach(key => {
+//     delete questionCache[key]
+//   })
+//   lastLoadTime.value = 0
+// }
+
+// 防抖函数（备用）
+// function debounce(func, wait) {
+//   let timeout
+//   return function executedFunction(...args) {
+//     const later = () => {
+//       clearTimeout(timeout)
+//       func(...args)
+//     }
+//     clearTimeout(timeout)
+//     timeout = setTimeout(later, wait)
+//   }
+// }
 
 const formattedAnswer = computed(() => {
   const q = currentQuestion.value
@@ -411,6 +587,12 @@ function getFormattedAnswer(question) {
   if (type === 'judge') return answer ? '正确' : '错误'
   if (Array.isArray(answer)) return answer.join(', ')
   return answer || '（未设置）'
+}
+
+function formatQuestionCountScore(score, total) {
+  const safeScore = Number.isFinite(Number(score)) ? Number(score) : 0
+  const safeTotal = Number.isFinite(Number(total)) ? Number(total) : 0
+  return `${safeScore}/${safeTotal}`
 }
 
 function closeAllExplanations() {
@@ -453,6 +635,7 @@ function handleKeydown(e) {
 
 onMounted(async () => {
   await loadQuestionSets()
+  await loadMistakes()
   window.addEventListener('keydown', handleKeydown)
 })
 
@@ -473,6 +656,21 @@ async function loadQuestionSets() {
     sets.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMistakes() {
+  try {
+    const response = await getMistakes(selectedSetId.value || undefined)
+    const data = handleResponse(response, [])
+    const mistakeList = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : [])
+    mistakeList.forEach(m => {
+      if (m.question?.id) {
+        addedMistakesSet.add(m.question.id)
+      }
+    })
+  } catch (error) {
+    console.error('加载错题集失败:', error)
   }
 }
 
@@ -542,32 +740,51 @@ async function loadQuestions() {
 
   try {
     loading.value = true
-    const response = await getQuestionSetQuestions(selectedSetId.value, { random: randomOrder.value })
-    const data = handleResponse(response)
     
-    let questionList = []
-    if (Array.isArray(data)) questionList = data
-    else if (data?.questions) questionList = data.questions
-    else if (data?.data?.questions) questionList = data.data.questions
-
-    questions.value = questionList.map(q => normalizeQuestion(q))
+    // 检查缓存
+    const cachedData = getCachedQuestions(selectedSetId.value)
+    if (cachedData && !randomOrder.value) {
+      console.log('使用缓存数据')
+      questions.value = cachedData.map(q => normalizeQuestion(q))
+      ElMessage.success(`从缓存加载 ${questions.value.length} 道题目`)
+    } else {
+      // 使用增强的API请求机制
+      const response = await apiRequestWithRetry(
+        () => getQuestionSetQuestions(selectedSetId.value, { random: randomOrder.value }),
+        3,
+        10000
+      )
+      
+      const data = handleResponse(response)
+      const questionList = extractQuestionList(data)
+      const validQuestionList = filterValidQuestions(questionList)
+      questions.value = validQuestionList.map(q => normalizeQuestion(q))
+      
+      // 缓存数据（非随机排序时）
+      if (!randomOrder.value && questions.value.length > 0) {
+        setCachedQuestions(selectedSetId.value, questions.value)
+      }
+      
+      ElMessage.success(`成功加载 ${questions.value.length} 道题目`)
+    }
     
-    Object.keys(userAnswers).forEach(k => delete userAnswers[k])
-    Object.keys(feedbackMap).forEach(k => delete feedbackMap[k])
-    Object.keys(correctMap).forEach(k => delete correctMap[k])
-    showExplanationSplit.value = false
-    showReport.value = false
-    currentIndex.value = 0
-    examStarted.value = false
+    resetAnswerState()
+    resetPracticeViewState()
     
-    await checkAndRestoreExamState()
-    await loadPracticeProgress()
+    // 加载恢复状态和进度
+    await Promise.allSettled([
+      checkAndRestoreExamState(),
+      loadPracticeProgress()
+    ])
+    
+    // 预加载第一个题目的详情
     if (questions.value.length > 0) {
       await ensureQuestionDetail(questions.value[0].id)
     }
+    
   } catch (error) {
     console.error('加载题目失败:', error)
-    ElMessage.error('加载题目失败')
+    ElMessage.error(getLoadQuestionErrorMessage(error))
     questions.value = []
   } finally {
     loading.value = false
@@ -578,8 +795,21 @@ async function checkAndRestoreExamState() {
   if (!selectedSetId.value) return
   
   try {
+    // 检查是否有 token
+    const token = localStorage.getItem('access_token')
+    if (!token) {
+      console.warn('未找到 access_token，跳过恢复考试状态检查')
+      return
+    }
+    
+    console.log('检查考试状态，token 存在，题集 ID:', selectedSetId.value)
+    console.log(`请求完整 URL: http://localhost:8000/api/exam/exams/restore-state/${selectedSetId.value}`)
+    
     const response = await restoreExamState(selectedSetId.value)
+    console.log('恢复考试状态响应:', response)
+    
     const stateData = handleResponse(response)
+    console.log('处理后的状态数据:', stateData)
     
     if (stateData?.answers) {
       ElMessageBox.confirm(
@@ -593,10 +823,35 @@ async function checkAndRestoreExamState() {
         examStarted.value = true
         startTimer()
         ElMessage.success('考试已恢复')
+      }).catch(async () => {
+        await clearPersistedExamState()
+        resetAnswerState()
+        resetPracticeViewState(true)
+        timeLeft.value = 0
+        ElMessage.success('已开始新考试')
       })
     }
   } catch (error) {
-    // 正常情况，没有可恢复的状态
+    // 404 代表没有可恢复状态或后端未启用该接口，按无状态处理
+    if (error.response?.status === 404 || error.message?.includes('404')) {
+      console.log('恢复考试状态接口可能未实现，跳过检查')
+      return
+    }
+    
+    console.error('检查考试状态失败:', error)
+    
+    // 如果是 422 错误（缺少 Authorization 头），提供更具体的提示
+    if (error.response?.status === 422 || error.message?.includes('422')) {
+      console.error('Authorization 头可能未正确发送，请检查登录状态')
+      // 尝试重新获取 token 或提示用户重新登录
+      const token = localStorage.getItem('access_token')
+      if (!token) {
+        ElMessage.warning('请先登录后再进行操作')
+      } else {
+        console.warn('token 存在但可能已过期，建议重新登录')
+      }
+    }
+    // 其他错误视为正常情况，没有可恢复的状态
   }
 }
 
@@ -612,7 +867,7 @@ function startTimer() {
         time_used: (questions.value.length * (timePerQuestion.value || 60)) - timeLeft.value,
         time_left: timeLeft.value,
         current_question_index: currentIndex.value
-      })
+      }).catch(() => {})
     }
     
     if (timeLeft.value <= 0) {
@@ -636,12 +891,21 @@ async function loadPracticeProgress() {
   }
 }
 
-function deleteSet() {
+async function deleteSet() {
   if (!selectedSetId.value) return
-  const idx = sets.value.findIndex(s => s.id === selectedSetId.value)
-  if (idx >= 0) sets.value.splice(idx, 1)
-  selectedSetId.value = null
-  questions.value = []
+  
+  try {
+    await deleteQuestionSet(selectedSetId.value)
+    ElMessage.success('题集已删除')
+    
+    const idx = sets.value.findIndex(s => s.id === selectedSetId.value)
+    if (idx >= 0) sets.value.splice(idx, 1)
+    selectedSetId.value = null
+    questions.value = []
+  } catch (error) {
+    console.error('删除题集失败:', error)
+    ElMessage.error('删除题集失败')
+  }
 }
 
 function componentFor(type) {
@@ -719,30 +983,56 @@ function computeCorrectnessFor(qid) {
   correctMap[qid] = ok
 }
 
-function addToMistakes() {
+async function addToMistakes() {
   const q = currentQuestion.value
   if (!q) return
-  
-  const mistakes = JSON.parse(localStorage.getItem('mistakes') || '[]')
-  const exists = mistakes.find(m => m.id === q.id)
-  if (exists) {
+
+  if (addedMistakesSet.has(q.id)) {
     ElMessage({ message: '该题目已在错题集中', type: 'warning' })
     return
   }
-  
-  mistakes.push({
-    ...q,
-    userAnswer: userAnswers[q.id],
-    addedAt: new Date().toISOString()
-  })
-  localStorage.setItem('mistakes', JSON.stringify(mistakes))
+
+  addedMistakesSet.add(q.id)
   ElMessage({ message: '已加入错题集', type: 'success' })
+
+  try {
+    const response = await addMistake({
+      question_id: q.id,
+      question_set_id: selectedSetId.value,
+      user_answer: userAnswers[q.id]
+    })
+    const data = handleResponse(response)
+    if (data?.already_exists) {
+      ElMessage({ message: '该题目已在错题集中', type: 'warning' })
+    }
+  } catch (error) {
+    addedMistakesSet.delete(q.id)
+    console.error('加入错题集失败:', error)
+    ElMessage({ message: '加入错题集失败', type: 'error' })
+  }
+}
+
+async function removeFromMistakes(questionId) {
+  if (!questionId) return
+
+  addedMistakesSet.delete(questionId)
+  ElMessage({ message: '已取消加入', type: 'info' })
+
+  try {
+    await removeMistake(questionId, selectedSetId.value)
+  } catch (error) {
+    addedMistakesSet.add(questionId)
+    console.error('取消加入错题集失败:', error)
+    ElMessage({ message: '取消加入失败', type: 'error' })
+  }
 }
 
 async function startExam() {
   if (!questions.value.length || !selectedSetId.value) return
   
   try {
+    await clearPersistedExamState()
+    
     const response = await startExamWithConfig({
       question_set_id: selectedSetId.value,
       custom_duration: customDuration.value > 0 ? customDuration.value : undefined,
@@ -757,11 +1047,8 @@ async function startExam() {
       timeLeft.value = questions.value.length * (timePerQuestion.value || 60)
     }
     
-    showReport.value = false
-    showExplanationSplit.value = false
-    Object.keys(userAnswers).forEach(k => delete userAnswers[k])
-    Object.keys(correctMap).forEach(k => delete correctMap[k])
-    Object.keys(feedbackMap).forEach(k => delete feedbackMap[k])
+    resetAnswerState()
+    resetPracticeViewState()
     examStarted.value = true
     startTimer()
     ElMessage.success('考试开始')
@@ -772,37 +1059,86 @@ async function startExam() {
 }
 
 async function submitExam() {
+  // 添加确认对话框，防止误操作
+  if (mode.value === 'exam' && examStarted.value) {
+    try {
+      await ElMessageBox.confirm(
+        `确定要交卷吗？\n已答 ${Object.keys(userAnswers).length}/${questions.value.length} 题`,
+        '确认交卷',
+        {
+          confirmButtonText: '确定交卷',
+          cancelButtonText: '继续答题',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return // 用户取消交卷
+    }
+  }
+  
   if (timer.value) {
     clearInterval(timer.value)
     timer.value = null
   }
   
-  if (!selectedSetId.value) return
+  if (!selectedSetId.value) {
+    ElMessage.warning('请先选择题集')
+    return
+  }
   
-  try {
-    const timeUsed = (questions.value.length * timePerQuestion.value) - timeLeft.value
-    const response = await submitExamApi({
-      question_set_id: selectedSetId.value,
-      answers: { ...userAnswers },
-      time_used: timeUsed
+  // 显示提交中状态
+    const loadingMessage = ElMessage({
+      message: '正在提交考试...',
+      type: 'info',
+      duration: 0
     })
-    
-    const data = handleResponse(response)
-    if (data) {
-      report.correctCount = data.correct_count || 0
-      report.wrongCount = data.wrong_count || 0
-      report.totalScore = data.total_score || 0
-      report.score = data.score || 0
-      report.timeUsed = data.time_used || timeUsed
-      report.examId = data.exam_id
-    }
+   
+   try {
+     const timeUsed = (questions.value.length * timePerQuestion.value) - timeLeft.value
+     
+     // 验证用户答案
+    const validAnswers = Object.entries(userAnswers).filter(([, answer]) => 
+      answer !== undefined && answer !== null && answer !== ''
+    )
+     
+     const response = await apiRequestWithRetry(
+       () => submitExamApi({
+         question_set_id: selectedSetId.value,
+         answers: Object.fromEntries(validAnswers),
+         time_used: timeUsed
+       }),
+       2,
+       15000
+     )
+     
+     const data = handleResponse(response)
+     const totalQuestions = questions.value.length
+     const correctCount = data?.correct_count || 0
+     if (data) {
+       report.correctCount = correctCount
+       report.wrongCount = data.wrong_count || 0
+       report.totalScore = totalQuestions
+       report.score = correctCount
+       report.timeUsed = data.time_used || timeUsed
+       report.examId = data.exam_id
+     } else {
+       report.correctCount = 0
+       report.wrongCount = 0
+       report.totalScore = totalQuestions
+       report.score = 0
+       report.timeUsed = timeUsed
+     }
+     
+    await clearPersistedExamState()
     
     showReport.value = true
     reportCollapsed.value = false
     examStarted.value = false
+    loadingMessage.close() // 关闭加载提示
     ElMessage.success('考试提交成功')
   } catch (error) {
     console.error('提交考试失败:', error)
+    loadingMessage.close() // 关闭加载提示
     ElMessage.error('提交考试失败')
   }
 }
@@ -812,7 +1148,7 @@ async function viewAllExplanations() {
     try {
       const response = await getExamReport(report.examId)
       const reportData = handleResponse(response)
-      
+
       if (reportData) {
         if (reportData.correctness) Object.assign(correctMap, reportData.correctness)
         if (reportData.questions) questions.value = reportData.questions.map(q => normalizeQuestion(q))
@@ -821,58 +1157,62 @@ async function viewAllExplanations() {
       console.error('加载考试报告失败:', error)
     }
   }
-  
-  // 为缺少数据的题目获取详情
-  const updatedQuestions = []
-  let hasMissingData = false
-  
-  for (const q of questions.value) {
-    if (q.answer === null || q.explanation === null) {
-      hasMissingData = true
-      try {
-        const detailResponse = await getQuestionDetail(q.id)
-        const detailData = handleResponse(detailResponse)
+
+  // 为缺少数据的题目并发获取详情
+  const questionsNeedingDetails = questions.value.filter(
+    q => q.answer === null || q.explanation === null
+  )
+
+  if (questionsNeedingDetails.length > 0) {
+    try {
+      const detailPromises = questionsNeedingDetails.map(q =>
+        getQuestionDetail(q.id)
+          .then(detailResponse => ({ q, detailData: handleResponse(detailResponse) }))
+          .catch(() => ({ q, detailData: null }))
+      )
+
+      const results = await Promise.all(detailPromises)
+
+      const detailMap = new Map()
+      results.forEach(({ q, detailData }) => {
         if (detailData) {
-          updatedQuestions.push(normalizeQuestion({ ...q, ...detailData }))
-        } else {
-          updatedQuestions.push(q)
+          detailMap.set(q.id, normalizeQuestion({ ...q, ...detailData }))
         }
-      } catch (error) {
-        updatedQuestions.push(q)
-      }
-    } else {
-      updatedQuestions.push(q)
+      })
+
+      questions.value = questions.value.map(q => detailMap.get(q.id) || q)
+    } catch (error) {
+      console.error('批量加载题目详情失败:', error)
     }
   }
-  
-  if (hasMissingData) questions.value = updatedQuestions
+
   showAllExplanations.value = true
 }
 
-function addAllWrongToMistakes() {
-  const wrongQuestions = questions.value.filter(q => correctMap[q.id] === false)
+async function addAllWrongToMistakes() {
+  const wrongQuestions = questions.value.filter(q => correctMap[q.id] === false && !addedMistakesSet.has(q.id))
   if (wrongQuestions.length === 0) {
-    ElMessage({ message: '没有错题需要加入', type: 'info' })
+    ElMessage({ message: '所有错题已在错题集中', type: 'info' })
     return
   }
-  
-  const mistakes = JSON.parse(localStorage.getItem('mistakes') || '[]')
-  let addedCount = 0
-  
-  wrongQuestions.forEach(q => {
-    const exists = mistakes.find(m => m.id === q.id)
-    if (!exists) {
-      mistakes.push({
-        ...q,
-        userAnswer: userAnswers[q.id],
-        addedAt: new Date().toISOString()
-      })
-      addedCount++
+
+  try {
+    const mistakesData = wrongQuestions.map(q => ({
+      question_id: q.id,
+      question_set_id: selectedSetId.value,
+      user_answer: userAnswers[q.id]
+    }))
+
+    const response = await batchAddMistakes({ questions: mistakesData })
+    const data = handleResponse(response)
+    if (data) {
+      wrongQuestions.forEach(q => addedMistakesSet.add(q.id))
+      ElMessage({ message: `已添加 ${data.added_count || wrongQuestions.length} 道错题到错题集`, type: 'success' })
     }
-  })
-  
-  localStorage.setItem('mistakes', JSON.stringify(mistakes))
-  ElMessage({ message: `已添加 ${addedCount} 道错题到错题集`, type: 'success' })
+  } catch (error) {
+    console.error('批量加入错题集失败:', error)
+    ElMessage({ message: '批量加入错题集失败', type: 'error' })
+  }
 }
 
 async function saveProgress() {
