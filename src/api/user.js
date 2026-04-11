@@ -65,9 +65,17 @@ export function getUserInfo() {
  */
 export function updateUserInfo(data) {
   return service({
+    url: '/user/update',
+    method: 'put',
+    data: data
+  })
+}
+
+export function updateUserEmail(data) {
+  return service({
     url: '/user/update_email',
     method: 'post',
-    data: data
+    data
   })
 }
 
@@ -129,5 +137,49 @@ export function forgotPassword(data) {
     url: '/user/forgot_password',
     method: 'post',
     data: data
+  })
+}
+
+/**
+ * 获取用户统计信息
+ * @returns {Promise}
+ */
+export function getUserStats() {
+  return service({
+    url: '/user/stats',
+    method: 'get'
+  })
+}
+
+/**
+ * 导出用户数据
+ * @param {string} format - 导出格式 (csv/json)
+ * @returns {Promise}
+ */
+export function exportUserData(format = 'csv') {
+  return service({
+    url: `/user/export?format=${format}`,
+    method: 'get',
+    responseType: 'blob'
+  })
+}
+
+/**
+ * 更新用户偏好设置
+ * @param {Object} data - 设置数据
+ * @returns {Promise}
+ */
+export function updateUserSettings(data) {
+  return service({
+    url: '/user/settings',
+    method: 'put',
+    data: data
+  })
+}
+
+export function getUserSettings() {
+  return service({
+    url: '/user/settings',
+    method: 'get'
   })
 }

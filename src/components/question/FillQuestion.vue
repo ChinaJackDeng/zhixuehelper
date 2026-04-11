@@ -8,7 +8,6 @@
           v-model="localValue"
           placeholder="请输入答案"
           class="fill-input"
-          @input="emit('update:modelValue', localValue)"
       />
     </template>
   </QuestionBase>

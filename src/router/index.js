@@ -151,6 +151,106 @@ const routes = [
             title:'强化练习 - 智学助手',
             requiresAuth: true
         }
+    },
+    {
+        path: '/admin/login',
+        name: 'AdminLogin',
+        component: () => import('@/views/admin/AdminLogin.vue'),
+        meta: {
+            title: '管理端登录 - 智学助手',
+            guestOnly: true
+        }
+    },
+    {
+        path: '/admin',
+        component: () => import('@/views/admin/AdminLayout.vue'),
+        redirect: '/admin/dashboard',
+        meta: {
+            requiresAuth: true,
+            requiresAdmin: true
+        },
+        children: [
+            {
+                path: 'dashboard',
+                name: 'AdminDashboard',
+                component: () => import('@/views/admin/AdminDashboard.vue'),
+                meta: {
+                    title: '系统总览 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'incidents',
+                name: 'AdminIncidents',
+                component: () => import('@/views/admin/AdminIncidents.vue'),
+                meta: {
+                    title: '异常处置中心 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'quality',
+                name: 'AdminQuality',
+                component: () => import('@/views/admin/AdminQuality.vue'),
+                meta: {
+                    title: '题目质量运营台 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'reach',
+                name: 'AdminReach',
+                component: () => import('@/views/admin/AdminReach.vue'),
+                meta: {
+                    title: '通知与触达 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'notifications',
+                name: 'AdminNotifications',
+                component: () => import('@/views/admin/AdminNotifications.vue'),
+                meta: {
+                    title: '通知运营 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'users',
+                name: 'AdminUsers',
+                component: () => import('@/views/admin/AdminUsers.vue'),
+                meta: {
+                    title: '用户管理 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'logs',
+                name: 'AdminLogs',
+                component: () => import('@/views/admin/AdminLogs.vue'),
+                meta: {
+                    title: '日志管理 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            },
+            {
+                path: 'ai-config',
+                name: 'AdminAIConfig',
+                component: () => import('@/views/admin/AdminAIConfig.vue'),
+                meta: {
+                    title: 'AI 配置 - 管理端',
+                    requiresAuth: true,
+                    requiresAdmin: true
+                }
+            }
+        ]
     }
 
 ]
@@ -166,6 +266,17 @@ const isAuthenticated = () => {
     return !!token
 }
 
+const isAdmin = () => {
+    const raw = localStorage.getItem('userInfo')
+    if (!raw) return false
+    try {
+        const info = JSON.parse(raw)
+        return Boolean(info?.isAdmin || info?.role === 'admin')
+    } catch (error) {
+        return false
+    }
+}
+
 // 路由守卫
 router.beforeEach((to, from, next) => {
     // 设置页面标题
@@ -174,6 +285,21 @@ router.beforeEach((to, from, next) => {
     }
 
     const authenticated = isAuthenticated()
+    const admin = isAdmin()
+
+    if (to.meta.requiresAdmin) {
+        if (!authenticated) {
+            next({
+                path: '/admin/login',
+                query: { redirect: to.fullPath }
+            })
+            return
+        }
+        if (!admin) {
+            next('/analytics')
+            return
+        }
+    }
 
     // 需要登录的页面
     if (to.meta.requiresAuth && !authenticated) {
@@ -186,6 +312,10 @@ router.beforeEach((to, from, next) => {
 
     // 只有未登录用户可访问的页面（登录页、注册页）
     if (to.meta.guestOnly && authenticated) {
+        if (to.path.startsWith('/admin')) {
+            next(admin ? '/admin/dashboard' : '/analytics')
+            return
+        }
         next('/analytics')
         return
     }

@@ -1,8 +1,6 @@
-<!-- src/views/exam/QuestionGenerator.vue -->
 <template>
   <div class="question-generator-page">
     <div class="page-body">
-      <!-- 左侧参数配置区 (60%) -->
       <div class="config-section">
         <el-card shadow="never" class="config-card">
           <el-form
@@ -18,7 +16,6 @@
             </div>
 
             <div class="config-form-content">
-            <!-- 1. 标签检索 -->
             <el-form-item
                 prop="tags"
                 class="tag-form-item"
@@ -70,7 +67,6 @@
               </div>
             </el-form-item>
 
-            <!-- 2. 文件选择 -->
             <el-form-item
                 label="知识文件"
                 prop="selectedFiles"
@@ -105,7 +101,6 @@
               <el-empty v-if="!loadingFiles && filteredFiles.length === 0" description="暂无匹配的知识文件" />
             </el-form-item>
 
-            <!-- 3. 题型选择 -->
 <el-form-item label="题型选择" prop="questionTypes">
   <div class="type-list-container">
     <div 
@@ -115,7 +110,6 @@
       :class="{ selected: configForm.questionTypes.includes(type.value) }"
     >
       <div class="type-content" @click="toggleQuestionType(type.value)">
-        <!-- 左侧：复选框 + 题型名称 -->
         <div class="type-left">
           <el-checkbox
             :model-value="configForm.questionTypes.includes(type.value)"
@@ -124,7 +118,6 @@
           <span class="type-label-text">{{ type.label }}</span>
         </div>
         
-        <!-- 右侧：数量控制（仅在选择时显示） -->
         <div 
           v-if="configForm.questionTypes.includes(type.value)" 
           class="type-right"
@@ -155,7 +148,6 @@
   </div>
 </el-form-item>
 
-            <!-- 4. 难度选择 -->
             <el-form-item label="题目难度" prop="difficulty">
               <el-select v-model="configForm.difficulty" style="width: 100%" size="large">
                 <el-option label="🟢 简单" value="easy" />
@@ -165,7 +157,6 @@
               </el-select>
             </el-form-item>
 
-            <!-- 5. 生成设置 -->
             <el-form-item label="生成设置">
               <el-row :gutter="20">
                 <el-col :span="12">
@@ -186,7 +177,6 @@
             </el-form-item>
             </div>
 
-            <!-- 生成按钮 -->
             <div class="form-actions">
               <el-button @click="resetConfig" size="large" :disabled="generating">重置</el-button>
               <el-button
@@ -213,7 +203,6 @@
         </el-card>
       </div>
 
-      <!-- 右侧题目展示区 (40%) -->
       <div class="preview-section">
         <el-card shadow="never" class="preview-card">
           <div class="preview-header">
@@ -231,9 +220,7 @@
             </div>
           </div>
 
-          <!-- 题目卡片 -->
           <div class="question-card-container" :class="{ 'is-generating': generating }">
-            <!-- 加载动画 -->
             <div v-if="generating" class="loading-animation">
               <div class="loading-spinner"></div>
               <div class="loading-text">
@@ -251,7 +238,6 @@
             <el-empty v-else-if="generatedQuestions.length === 0" description="生成题目后将显示在此处" />
             
             <div v-else class="question-card">
-              <!-- 题目头部 -->
               <div class="question-header">
                 <el-tag size="small" :type="getTagType(currentQuestion.type)">
                   {{ getTypeLabel(currentQuestion.type) }}
@@ -262,11 +248,21 @@
                 <div class="question-id">第 {{ currentQuestionIndex + 1 }} 题</div>
               </div>
 
-              <!-- 题目内容 -->
               <div class="question-content">
                 <p class="question-stem">{{ currentQuestion.stem }}</p>
+                <div v-if="currentQuestion.knowledge_points?.length" class="knowledge-points-section">
+                  <span class="knowledge-points-label">考点：</span>
+                  <el-tag
+                    v-for="(point, idx) in currentQuestion.knowledge_points"
+                    :key="`${point}-${idx}`"
+                    size="small"
+                    effect="plain"
+                    type="info"
+                  >
+                    {{ point }}
+                  </el-tag>
+                </div>
 
-                <!-- 选项 -->
                 <div v-if="['single', 'multi'].includes(currentQuestion.type)" class="options-list">
                   <div
                       v-for="opt in currentQuestion.options"
@@ -394,8 +390,8 @@ let removeRouteGuard = null
 // 表单数据
 const configFormRef = ref(null)
 const generating = ref(false)
-const showAnswer = ref(false)
-const showExplanation = ref(false)
+const showAnswer = ref(true)
+const showExplanation = ref(true)
 const currentQuestionIndex = ref(0)
 const pollTimer = ref(null) // 轮询定时器 ID
 const shouldStopPolling = ref(false) // 是否应该停止轮询
@@ -742,6 +738,22 @@ const formatFileSize = (size) => {
   return (size / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+const normalizeKnowledgePoints = (value) => {
+  const splitBySeparators = (text) =>
+    text
+      .split(/[，,;；、|/]/)
+      .map(item => item.trim())
+      .filter(Boolean)
+
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(item => String(item ?? '').trim()).filter(Boolean))]
+  }
+  if (typeof value === 'string') {
+    return [...new Set(splitBySeparators(value))]
+  }
+  return []
+}
+
 // 事件处理
 const handleTagChange = async () => {
   configForm.selectedFiles = []
@@ -802,7 +814,8 @@ const generateQuestions = async () => {
           type: q.type === 'choice' ? 'single' : q.type,
           stem: q.content,  // 将 content 映射为 stem
           options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : [],
-          difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
+          difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium',
+          knowledge_points: normalizeKnowledgePoints(q.knowledge_points)
         }
       })
       
@@ -903,7 +916,8 @@ const pollGenerationProgress = async (taskId) => {
                 stem: q.stem,  // 将 content 映射为 stem
                 options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : [],
                 explanation: q.explanation,  // analysis -> explanation
-                difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
+                difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium',
+                knowledge_points: normalizeKnowledgePoints(q.knowledge_points)
               }
             })
             
@@ -953,7 +967,8 @@ const pollGenerationProgress = async (taskId) => {
             type: q.type === 'choice' ? 'single' : q.type,
             stem: q.content,  // 将 content 映射为 stem
             options: q.options ? Object.entries(q.options).map(([key, text]) => ({ key, text })) : [],
-            difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium'
+            difficulty: normalizeDifficulty(q.difficulty) || normalizeDifficulty(configForm.difficulty) || 'medium',
+            knowledge_points: normalizeKnowledgePoints(q.knowledge_points)
           }
         })
         
@@ -1092,6 +1107,7 @@ const saveQuestions = async () => {
         answer: q.answer,
         analysis: q.explanation,  // explanation -> analysis
         difficulty: q.difficulty || 'medium',
+        knowledge_points: normalizeKnowledgePoints(q.knowledge_points),
         tags: configForm.tags,  // 直接使用当前选择的标签ID数组
         source_document_id: configForm.selectedFiles[0] ? Number(configForm.selectedFiles[0]) : null
       }
@@ -1727,6 +1743,19 @@ const goToQuestion = (index) => {
   color: #333;
   margin: 0 0 16px 0;
   font-weight: 500;
+}
+
+.knowledge-points-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.knowledge-points-label {
+  font-size: 13px;
+  color: #606266;
 }
 
 .options-list {

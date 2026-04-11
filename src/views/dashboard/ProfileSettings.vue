@@ -12,6 +12,31 @@
       
       <div v-if="expandedSections.account" class="section-content">
         <div class="form-group">
+          <label>头像</label>
+          <div class="avatar-setting">
+            <div class="avatar-preview">
+              <el-avatar :size="68" :src="getAvatarUrl(selectedAvatar)">
+                {{ profile.username?.charAt(0) || 'U' }}
+              </el-avatar>
+            </div>
+            <div class="avatar-grid">
+              <div
+                v-for="avatar in avatarOptions"
+                :key="avatar"
+                class="avatar-item"
+                :class="{ selected: selectedAvatar === avatar }"
+                @click="selectedAvatar = avatar"
+              >
+                <img :src="getAvatarUrl(avatar)" :alt="avatar" />
+              </div>
+            </div>
+            <el-button type="primary" plain size="large" @click="updateAvatar">
+              保存头像
+            </el-button>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label>用户名</label>
           <div class="input-with-btn">
             <el-input v-model="profile.username" placeholder="请输入用户名" size="large" />
@@ -137,7 +162,7 @@
             <p>将您的对话记录导出为文件，便于备份或迁移</p>
             <div class="export-meta">
               <span>
-                {{ mockConversations.length }} 条对话
+                {{ profile.stats.conversations }} 条对话
               </span>
             </div>
           </div>
@@ -145,8 +170,8 @@
             <el-button type="primary" size="large" @click="exportData('json')">
               导出 JSON
             </el-button>
-            <el-button type="primary" size="large" @click="exportData('txt')">
-              导出 TXT
+            <el-button type="primary" size="large" @click="exportData('csv')">
+              导出 CSV
             </el-button>
           </div>
         </div>
@@ -186,7 +211,17 @@ import { ref, computed, onMounted } from 'vue'
 import { useStore } from 'vuex'
 import { ElMessage } from 'element-plus'
 import { ArrowUp, ArrowDown } from '@element-plus/icons-vue'
-import { updateUserInfo, changePassword, sendVerificationCode, getUserInfo } from '@/api/user'
+import {
+  updateUserInfo,
+  updateUserEmail,
+  changePassword,
+  sendVerificationCode,
+  getUserInfo,
+  getUserStats,
+  getUserSettings,
+  updateUserSettings,
+  exportUserData
+} from '@/api/user'
 
 // 展开/折叠状态
 const expandedSections = ref({
@@ -202,17 +237,33 @@ const toggleSection = (section) => {
 
 // ========== 个人资料数据 ==========
 const store = useStore()
+const avatarOptions = ['avatar_boy_1.png', 'avatar_boy_2.png', 'avatar_girl_1.png', 'avatar_girl_2.png']
+const selectedAvatar = ref(store.getters['auth/userInfo']?.avatar || 'avatar_boy_1.png')
 const profile = ref({
   username: store.getters['auth/userInfo']?.username || '用户',
   email: store.getters['auth/userInfo']?.email || '',
+  avatar: store.getters['auth/userInfo']?.avatar || 'avatar_boy_1.png',
   code: '',
   stats: {
-    conversations: 128,
-    tokens: 5600,
-    docs: 12,
-    storage: 15.6
+    conversations: 0,
+    tokens: 0,
+    docs: 0,
+    storage: 0
   }
 })
+
+const getAvatarUrl = (avatar) => `/images/${avatar}`
+
+const syncUserInfoToStore = async () => {
+  const latest = await getUserInfo()
+  if (latest) {
+    store.commit('auth/SET_USER_INFO', latest)
+    profile.value.username = latest.username || profile.value.username
+    profile.value.email = latest.email || profile.value.email
+    profile.value.avatar = latest.avatar || profile.value.avatar
+    selectedAvatar.value = latest.avatar || selectedAvatar.value
+  }
+}
 
 const showPwd = ref(false)
 const pwd = ref({ old: '', new: '', confirm: '' })
@@ -223,32 +274,42 @@ const tokenWords = computed(() => {
 
 const updateUsername = async () => {
   try {
-    await updateUserInfo({ username: profile.value.username })
-    
-    // 重新获取用户信息并更新 store
-    try {
-      const response = await getUserInfo()
-      if (response.data && response.data.data) {
-        store.commit('auth/SET_USER_INFO', response.data.data)
-      }
-    } catch (error) {
-      console.error('获取用户信息失败:', error)
+    const username = String(profile.value.username || '').trim()
+    if (!username) {
+      ElMessage.warning('用户名不能为空')
+      return
     }
-    
+    await updateUserInfo({ username })
+    await syncUserInfoToStore()
     ElMessage.success('用户名已保存')
   } catch (error) {
     ElMessage.error('更新失败: ' + (error.message || '未知错误'))
   }
 }
 
+const updateAvatar = async () => {
+  try {
+    await updateUserInfo({ avatar: selectedAvatar.value })
+    await syncUserInfoToStore()
+    ElMessage.success('头像已更新')
+  } catch (error) {
+    ElMessage.error('头像更新失败: ' + (error.message || '未知错误'))
+  }
+}
+
 const sendCode = async () => {
-  if (!profile.value.email) {
+  const normalizedEmail = String(profile.value.email || '').trim().toLowerCase()
+  if (!normalizedEmail) {
     ElMessage.warning('请输入邮箱地址')
     return
   }
   
   try {
-    await sendVerificationCode({ email: profile.value.email, purpose: 'update_email' })
+    const response = await sendVerificationCode({ email: normalizedEmail, purpose: 'update_email' })
+    if (response?.status === 'email_exists') {
+      ElMessage.warning('该邮箱已被使用，请更换其他邮箱')
+      return
+    }
     ElMessage.success('验证码已发送')
   } catch (error) {
     ElMessage.error('发送失败: ' + (error.message || '未知错误'))
@@ -258,18 +319,20 @@ const sendCode = async () => {
 
 const updateEmail = async () => {
   try {
-    await updateUserInfo({ email: profile.value.email, code: profile.value.code })
-    ElMessage.success('邮箱已更换')
-    
-    // 重新获取用户信息并更新 store
-    try {
-      const response = await getUserInfo()
-      if (response.data && response.data.data) {
-        store.commit('auth/SET_USER_INFO', response.data.data)
-      }
-    } catch (error) {
-      console.error('获取用户信息失败:', error)
+    const normalizedEmail = String(profile.value.email || '').trim().toLowerCase()
+    const code = String(profile.value.code || '').trim()
+    if (!normalizedEmail) {
+      ElMessage.warning('请输入邮箱地址')
+      return
     }
+    if (!code) {
+      ElMessage.warning('请输入验证码')
+      return
+    }
+    await updateUserEmail({ email: normalizedEmail, code })
+    ElMessage.success('邮箱已更换')
+    profile.value.code = ''
+    await syncUserInfoToStore()
   } catch (error) {
     // 显示具体的错误信息
     let errorMsg = '更新失败'
@@ -279,6 +342,9 @@ const updateEmail = async () => {
       errorMsg = error.response.data.message
     } else if (error.message) {
       errorMsg = error.message
+    }
+    if (String(errorMsg).includes('邮箱') && String(errorMsg).includes('使用')) {
+      errorMsg = '该邮箱已被使用，请更换其他邮箱'
     }
     
     ElMessage.error(errorMsg)
@@ -307,53 +373,67 @@ const settings = ref({
 const saving = ref(false)
 const lastSavedTime = ref('刚刚')
 
-const mockConversations = ref([
-  {
-    id: 1,
-    timestamp: new Date().toISOString(),
-    user: '如何学习 Vue3？',
-    assistant: '从 Composition API 开始，配合官方文档与实战项目。'
-  },
-  {
-    id: 2,
-    timestamp: new Date(Date.now() - 86400000).toISOString(),
-    user: 'Promise 是什么？',
-    assistant: 'Promise 是用于处理异步操作的对象。'
+const loadStats = async () => {
+  try {
+    const stats = await getUserStats()
+    if (stats) {
+      profile.value.stats.conversations = Number(stats.conversations || 0)
+      profile.value.stats.tokens = Number(stats.tokens || 0)
+      profile.value.stats.docs = Number(stats.docs || 0)
+      profile.value.stats.storage = Number(stats.storage || 0)
+    }
+  } catch (error) {
+    ElMessage.error('学习统计加载失败，请稍后重试')
   }
-])
-
-const saveSettings = async () => {
-  saving.value = true
-  await new Promise(r => setTimeout(r, 1000))
-  localStorage.setItem('userSettings', JSON.stringify(settings.value))
-  lastSavedTime.value = new Date().toLocaleTimeString()
-  ElMessage.success('设置保存成功')
-  saving.value = false
 }
 
-const exportData = (format) => {
-  const data =
-    format === 'json'
-      ? JSON.stringify(mockConversations.value, null, 2)
-      : mockConversations.value
-          .map((c, i) => `对话 ${i + 1}\n${c.user}\n${c.assistant}\n`)
-          .join('\n')
+const loadSettings = async () => {
+  try {
+    const data = await getUserSettings()
+    if (data) {
+      settings.value.maxResponseLength = Number(data.max_response_length || 2048)
+      settings.value.historyRetention = String(data.history_retention_days ?? 30)
+    }
+  } catch (error) {
+    ElMessage.error('设置加载失败，请稍后重试')
+  }
+}
 
-  const blob = new Blob([data], {
-    type: format === 'json' ? 'application/json' : 'text/plain'
-  })
+const saveSettings = async () => {
+  try {
+    saving.value = true
+    await updateUserSettings({
+      max_response_length: Number(settings.value.maxResponseLength || 2048),
+      history_retention_days: Number(settings.value.historyRetention || 30)
+    })
+    lastSavedTime.value = new Date().toLocaleTimeString()
+    ElMessage.success('设置保存成功')
+  } catch (error) {
+    ElMessage.error(error?.message || '设置保存失败，请稍后重试')
+  } finally {
+    saving.value = false
+  }
+}
 
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `conversations.${format}`
-  a.click()
-
-  ElMessage.success(`已导出为 ${format.toUpperCase()}`)
+const exportData = async (format) => {
+  try {
+    const exportFormat = format === 'csv' ? 'csv' : 'json'
+    const blob = await exportUserData(exportFormat)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `user_data.${exportFormat}`
+    a.click()
+    URL.revokeObjectURL(a.href)
+    ElMessage.success(`已导出为 ${exportFormat.toUpperCase()}`)
+  } catch (error) {
+    ElMessage.error(error?.message || '导出失败，请稍后重试')
+  }
 }
 
 onMounted(() => {
-  const saved = localStorage.getItem('userSettings')
-  if (saved) settings.value = JSON.parse(saved)
+  syncUserInfoToStore().catch(() => {})
+  loadStats().catch(() => {})
+  loadSettings().catch(() => {})
 })
 </script>
 
@@ -423,6 +503,49 @@ onMounted(() => {
   font-weight: 500;
   color: #333;
   margin-bottom: 12px;
+}
+
+.avatar-setting {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.avatar-preview {
+  width: 80px;
+}
+
+.avatar-grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.avatar-item {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2px solid #dbe4ee;
+  cursor: pointer;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.avatar-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-item:hover {
+  border-color: #409eff;
+  transform: translateY(-1px);
+}
+
+.avatar-item.selected {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.25);
 }
 
 .input-with-btn {

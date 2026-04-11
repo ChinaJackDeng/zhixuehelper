@@ -1,6 +1,5 @@
 <template>
   <div class="wrong-questions-page">
-    <!-- 顶部操作栏 -->
     <div class="top-action-bar">
       <div class="search-section">
         <el-input
@@ -17,7 +16,6 @@
         <el-button type="primary" @click="handleSearch">搜索</el-button>
       </div>
 
-      <!-- 统计信息栏 -->
       <div class="stats-bar">
         <div class="stat-item">
           <div class="stat-value">{{ wrongQuestionSets.length }}</div>
@@ -36,16 +34,8 @@
           <div class="stat-label">待强化</div>
         </div>
       </div>
-
-      <div class="action-buttons">
-        <el-button type="primary" @click="createNewSet">
-          <el-icon><Plus /></el-icon>
-          新建错题集
-        </el-button>
-      </div>
     </div>
 
-    <!-- 筛选栏 -->
     <div class="filter-section">
       <div class="filter-left">
         <el-select v-model="filter.tagId" placeholder="选择知识标签" clearable>
@@ -66,7 +56,6 @@
       </div>
     </div>
 
-    <!-- 错题集网格 -->
     <div class="sets-grid" v-loading="loading">
       <div 
         v-for="set in filteredSets" 
@@ -92,11 +81,9 @@
         </div>
       </div>
 
-      <!-- 空状态 -->
       <div v-if="filteredSets.length === 0" class="empty-state">
         <el-icon class="empty-icon"><FolderOpened /></el-icon>
         <p>暂无错题集</p>
-        <el-button type="primary" @click="createNewSet">创建错题集</el-button>
       </div>
     </div>
   </div>
@@ -106,7 +93,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Folder, FolderOpened, Plus, Search } from '@element-plus/icons-vue'
+import { Folder, FolderOpened, Search } from '@element-plus/icons-vue'
 import { getMistakes } from '@/api/exam'
 import { getTagList } from '@/api/knowledge'
 
@@ -341,10 +328,6 @@ const viewSetDetail = (set) => {
   sessionStorage.setItem('currentWrongSet', JSON.stringify(set))
   router.push(`/wrong-questions/set/${set.id}`)
 }
-
-const createNewSet = () => {
-  ElMessage.info('错题集按知识标签自动归类，无需手动创建')
-}
 </script>
 
 <style scoped>
@@ -376,11 +359,6 @@ const createNewSet = () => {
   gap: 12px;
   flex: 1;
   max-width: 400px;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 12px;
 }
 
 /* 统计信息栏 */

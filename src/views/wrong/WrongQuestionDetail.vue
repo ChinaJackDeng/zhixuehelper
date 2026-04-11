@@ -1,6 +1,5 @@
 <template>
   <div class="wrong-question-detail-page">
-    <!-- 顶部操作栏 -->
     <div class="top-action-bar">
       <div class="header-left">
         <el-button circle @click="goBack" class="back-btn">
@@ -18,9 +17,7 @@
       </div>
     </div>
 
-    <!-- 主要内容区：左右分栏 -->
     <div class="main-content-area">
-      <!-- 左栏：题目信息 (65%) -->
       <div class="left-panel">
         <div class="question-card">
           <div class="question-content">
@@ -55,11 +52,11 @@
             <div class="analysis-content">
               <div class="analysis-item">
                 <span class="analysis-label">您的答案：</span>
-                <span class="analysis-value wrong">{{ formatAnswerDisplay(question.userAnswer) }}</span>
+                <span class="analysis-value wrong">{{ formatAnswerDisplay(question.userAnswer, question.type) }}</span>
               </div>
               <div class="analysis-item">
                 <span class="analysis-label">正确答案：</span>
-                <span class="analysis-value correct">{{ formatAnswerDisplay(question.correctAnswer) }}</span>
+                <span class="analysis-value correct">{{ formatAnswerDisplay(question.correctAnswer, question.type) }}</span>
               </div>
               <div class="analysis-item">
                 <span class="analysis-label">错误类型：</span>
@@ -72,7 +69,6 @@
           </div>
         </div>
 
-        <!-- AI解析 -->
         <div class="ai-analysis-card">
           <div class="card-header">
             <div class="header-left">
@@ -89,9 +85,7 @@
         </div>
       </div>
 
-      <!-- 右栏：知识溯源与推荐 (35%) -->
       <div class="right-panel">
-        <!-- 知识点溯源 -->
         <div class="knowledge-trace-card">
           <div class="card-header">
             <el-icon class="card-icon"><Collection /></el-icon>
@@ -110,13 +104,12 @@
                 <el-icon class="arrow-icon"><ArrowRight /></el-icon>
               </div>
               <div class="point-docs">
-                <span>关联 {{ (typeof point === 'object' && point.relatedDocs) || 3 }} 个文档</span>
+                <span>关联 {{ typeof point === 'object' ? (point.relatedDocs ?? 0) : 0 }} 个文档</span>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 知识库文档推荐 -->
         <div class="docs-recommend-card">
           <div class="card-header">
             <el-icon class="card-icon"><FolderOpened /></el-icon>
@@ -137,7 +130,7 @@
                 <div class="doc-meta">
                   <span>{{ doc.category }}</span>
                   <span>•</span>
-                  <span>{{ doc.relevance }}% 相关</span>
+                  <span>已关联</span>
                 </div>
               </div>
               <el-icon class="doc-arrow"><ArrowRight /></el-icon>
@@ -145,7 +138,6 @@
           </div>
         </div>
 
-        <!-- 相关题目推荐 -->
         <div class="related-questions-card">
           <div class="card-header">
             <div class="title-group">
@@ -208,18 +200,20 @@
                     {{ q.rawDifficulty === 'easy' ? '简单' : q.rawDifficulty === 'medium' ? '中等' : '困难' }}
                   </el-tag>
                 </div>
-                <div v-if="q.options && q.options.length > 0" class="question-options-preview">
+                <div v-if="showQuestionOptions(q)" class="question-options-preview">
                   <div v-for="(opt, optIndex) in q.options" :key="`${q.uiKey}-opt-${optIndex}`" class="preview-option">
                     {{ String.fromCharCode(65 + optIndex) }}. {{ opt }}
                   </div>
                 </div>
-                <div v-else class="no-options-tip">暂无选项，建议重新生成该题</div>
+                <div v-else-if="showAnswerPreview(q)" class="answer-preview">
+                  参考答案：{{ formatAnswerDisplay(q.correctAnswer, q.type) }}
+                </div>
+                <div v-else class="no-options-tip">该题型无需选项</div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 操作按钮 -->
         <div class="action-buttons">
           <el-button type="primary" size="large" @click="startReinforcement" class="full-width">
             开始强化练习
@@ -234,7 +228,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Warning, CircleCheck, CircleClose, ChatDotRound, Refresh, Collection, Document, ArrowRight, FolderOpened, List, Loading } from '@element-plus/icons-vue'
@@ -243,9 +237,10 @@ import {
   getMistakeDetail,
   regenerateMistakeAnalysis,
   markMistakeMastered,
-  getRelatedDocuments,
+  getRelatedQuestions,
   startReinforcement as startReinforcementApi,
   getReinforcementSessionQuestions,
+  getLatestReinforcementSession,
   addReinforcementQuestion
 } from '@/api/exam'
 
@@ -293,6 +288,8 @@ const relatedQuestionsLoading = ref(false)
 const generatingMessage = ref('')
 const maxReinforcementQuestions = ref(5)
 const reinforcementQuestionCount = ref(0)
+const relatedQuestionsRequestToken = ref(0)
+const generatedQuestionsRequestToken = ref(0)
 
 const remainingReinforcementSlots = computed(() => {
   return Math.max(0, maxReinforcementQuestions.value - reinforcementQuestionCount.value)
@@ -345,11 +342,32 @@ const regenerateAnalysis = async () => {
 }
 
 const viewKnowledge = (point) => {
-  ElMessage.info(`正在查看知识点：${typeof point === 'object' ? point.name : point}`)
+  const name = typeof point === 'object' ? point.name : point
+  if (!name) {
+    ElMessage.warning('知识点名称为空，无法溯源')
+    return
+  }
+  router.push({
+    path: '/knowledge',
+    query: {
+      keyword: String(name),
+      search_type: 'keyword'
+    }
+  })
 }
 
 const viewDocument = (doc) => {
-  ElMessage.info(`正在打开文档：${doc.title}`)
+  if (!doc?.id) {
+    ElMessage.warning('文档信息不完整，无法打开')
+    return
+  }
+  router.push({
+    path: '/knowledge',
+    query: {
+      docId: String(doc.id),
+      docTitle: doc.title || ''
+    }
+  })
 }
 
 function buildReinforcementPayload(q) {
@@ -393,6 +411,16 @@ function resolveAnswerRaw(item = {}) {
 
 function isQuestionChecked(uiKey) {
   return selectedRelatedQuestionKeys.value.includes(uiKey)
+}
+
+function showQuestionOptions(questionItem = {}) {
+  const qType = String(questionItem?.type || '').toLowerCase()
+  return ['single', 'multi'].includes(qType) && Array.isArray(questionItem.options) && questionItem.options.length > 0
+}
+
+function showAnswerPreview(questionItem = {}) {
+  const qType = String(questionItem?.type || '').toLowerCase()
+  return ['fill', 'essay'].includes(qType)
 }
 
 function handleQuestionCheckChange(uiKey, checked) {
@@ -565,7 +593,36 @@ const markMastered = async () => {
   }
   try {
     await markMistakeMastered(mistakeId.value)
-    question.value.mastered = true
+    const storedSetRaw = sessionStorage.getItem('currentWrongSet')
+    if (storedSetRaw) {
+      try {
+        const storedSet = JSON.parse(storedSetRaw)
+        const updatedQuestions = Array.isArray(storedSet.questions)
+          ? storedSet.questions.map(item => {
+            if (Number(item.mistakeId) === Number(mistakeId.value)) {
+              return {
+                ...item,
+                mastered: true
+              }
+            }
+            return item
+          })
+          : []
+        const masteredCount = updatedQuestions.filter(item => item.mastered).length
+        const status = updatedQuestions.length > 0 && masteredCount === updatedQuestions.length
+          ? 'mastered'
+          : (storedSet.status || 'pending')
+        sessionStorage.setItem('currentWrongSet', JSON.stringify({
+          ...storedSet,
+          questions: updatedQuestions,
+          masteredCount,
+          status
+        }))
+      } catch (e) {
+        sessionStorage.removeItem('currentWrongSet')
+      }
+    }
+    await loadMistakeDetail(mistakeId.value)
     ElMessage.success('已标记为已掌握')
   } catch (error) {
     console.error('标记已掌握失败:', error)
@@ -573,16 +630,29 @@ const markMastered = async () => {
   }
 }
 
-onMounted(async () => {
-  mistakeId.value = route.params.id
+const resetRelatedQuestionsState = () => {
+  relatedSessionId.value = null
+  relatedQuestions.value = []
+  selectedRelatedQuestionKeys.value = []
+  updateReinforcementCapacity({}, 0)
+}
+
+const loadMistakeDetail = async (id) => {
+  mistakeId.value = id
   if (!mistakeId.value) {
     ElMessage.error('无法获取错题ID')
     return
   }
 
+  const requestToken = Date.now()
+  relatedQuestionsRequestToken.value = requestToken
+  resetRelatedQuestionsState()
   loading.value = true
   try {
     const data = await getMistakeDetail(mistakeId.value)
+    if (relatedQuestionsRequestToken.value !== requestToken) {
+      return
+    }
     question.value = {
       id: data.question.id,
       mistakeId: data.id,
@@ -604,14 +674,33 @@ onMounted(async () => {
     aiAnalysis.value = stripSimilarQuestionsSection(data.ai_analysis || '暂无AI解析，点击"重新生成"获取智能分析')
     await Promise.all([
       loadRelatedDocuments(data),
-      loadRelatedQuestions()
+      loadInitialRelatedQuestions(data, requestToken)
     ])
   } catch (error) {
     console.error('获取错题详情失败:', error)
     ElMessage.error('获取错题详情失败，请稍后重试')
   } finally {
-    loading.value = false
+    if (relatedQuestionsRequestToken.value === requestToken) {
+      loading.value = false
+    }
   }
+}
+
+onMounted(async () => {
+  await loadMistakeDetail(route.params.id)
+})
+
+watch(
+  () => route.params.id,
+  async (newId, oldId) => {
+    if (!newId || newId === oldId) return
+    await loadMistakeDetail(newId)
+  }
+)
+
+onBeforeUnmount(() => {
+  relatedQuestionsRequestToken.value = Date.now()
+  generatedQuestionsRequestToken.value = Date.now()
 })
 
 function normalizeOptions(rawOptions) {
@@ -694,11 +783,21 @@ function isWrongOption(index) {
   return isUserSelected(index) && !isCorrectOption(index)
 }
 
-function formatAnswerDisplay(answer) {
+function formatAnswerDisplay(answer, type = '') {
   if (answer === null || answer === undefined || answer === '') return '未作答'
+  const normalizedType = String(type || '').toLowerCase()
+  if (normalizedType === 'judge') {
+    if (answer === true || answer === 1 || answer === '1') return '正确'
+    if (answer === false || answer === 0 || answer === '0') return '错误'
+    if (typeof answer === 'string') {
+      const lowered = answer.trim().toLowerCase()
+      if (['true', 't', 'yes', 'y', '正确', '对'].includes(lowered)) return '正确'
+      if (['false', 'f', 'no', 'n', '错误', '错'].includes(lowered)) return '错误'
+    }
+  }
   if (Array.isArray(answer)) {
     if (answer.length === 0) return '未作答'
-    return answer.map(item => formatAnswerDisplay(item)).join(', ')
+    return answer.map(item => formatAnswerDisplay(item, type)).join(', ')
   }
   if (typeof answer === 'number') {
     return String.fromCharCode(65 + answer)
@@ -713,47 +812,84 @@ function formatAnswerDisplay(answer) {
 }
 
 async function loadRelatedDocuments(detailData) {
+  const docs = Array.isArray(detailData?.related_documents) ? detailData.related_documents : []
+  recommendedDocs.value = docs.map(item => ({
+    id: item.id,
+    title: item.title || `文档 ${item.id}`,
+    category: item.file_type || '文档',
+    relevance: 100
+  }))
+}
+
+async function loadInitialRelatedQuestions(detailData, requestToken) {
+  relatedQuestionsLoading.value = true
+  generatingMessage.value = '正在加载已有强化练习题...'
   try {
-    const tags = Array.isArray(detailData.knowledge_points) ? detailData.knowledge_points.map(item => item.id).filter(Boolean) : []
-    const data = await getRelatedDocuments({
+    const existingData = await getLatestReinforcementSession(Number(mistakeId.value))
+    const existingQuestions = Array.isArray(existingData?.questions) ? existingData.questions : []
+    if (existingData?.session_id && existingQuestions.length > 0) {
+      if (relatedQuestionsRequestToken.value !== requestToken) {
+        return
+      }
+      relatedSessionId.value = existingData.session_id
+      updateReinforcementCapacity(existingData)
+      relatedQuestions.value = mapSimilarQuestionsForPanel(existingQuestions)
+      selectedRelatedQuestionKeys.value = []
+      return
+    }
+
+    generatingMessage.value = '正在加载相关题目...'
+    const sourceTagIds = Array.isArray(detailData?.question?.tags)
+      ? detailData.question.tags.map(item => item.id).filter(Boolean)
+      : []
+    const data = await getRelatedQuestions({
       mistake_id: Number(mistakeId.value),
-      question_id: detailData.question?.id,
-      question_set_id: detailData.question_set_id,
-      tags: tags.length > 0 ? tags.join(',') : undefined,
-      limit: 5
+      question_id: detailData?.question?.id,
+      tags: sourceTagIds.length > 0 ? sourceTagIds.join(',') : undefined,
+      limit: 8
     })
-    const docs = Array.isArray(data)
+    const rawQuestions = Array.isArray(data)
       ? data
-      : (Array.isArray(data?.documents) ? data.documents : [])
-    recommendedDocs.value = docs.map(item => ({
-      id: item.id,
-      title: item.title || `文档 ${item.id}`,
-      category: item.file_type || '文档',
-      relevance: Math.round((item.relevance_score || 0) * 100)
-    }))
+      : (Array.isArray(data?.questions) ? data.questions : [])
+    if (relatedQuestionsRequestToken.value !== requestToken) {
+      return
+    }
+    relatedQuestions.value = mapSimilarQuestionsForPanel(rawQuestions)
+    selectedRelatedQuestionKeys.value = []
   } catch (error) {
-    console.error('获取相关文档失败:', error)
-    recommendedDocs.value = []
+    console.error('获取相关题目失败:', error)
+    if (relatedQuestionsRequestToken.value === requestToken) {
+      relatedQuestions.value = []
+      selectedRelatedQuestionKeys.value = []
+    }
+  } finally {
+    if (relatedQuestionsRequestToken.value === requestToken) {
+      relatedQuestionsLoading.value = false
+      generatingMessage.value = ''
+    }
   }
 }
 
-async function loadRelatedQuestions() {
+async function loadGeneratedRelatedQuestions() {
+  const requestToken = Date.now()
+  generatedQuestionsRequestToken.value = requestToken
   relatedQuestionsLoading.value = true
   generatingMessage.value = '正在生成强化练习题，请稍候...'
-  const startTime = Date.now()
   try {
     const aiData = await startReinforcementApi({
       mistake_id: Number(mistakeId.value),
       question_count: Number(generateCount.value || 2)
     })
-    const elapsed = Date.now() - startTime
-    if (elapsed < 900) {
-      await new Promise(resolve => setTimeout(resolve, 900 - elapsed))
+    if (generatedQuestionsRequestToken.value !== requestToken) {
+      return false
     }
     relatedSessionId.value = aiData?.session_id || null
     updateReinforcementCapacity(aiData)
     if (relatedSessionId.value && !Number.isFinite(Number(aiData?.question_total_count))) {
       await syncQuestionCountFromSession(relatedSessionId.value)
+    }
+    if (generatedQuestionsRequestToken.value !== requestToken) {
+      return false
     }
     relatedQuestions.value = mapSimilarQuestionsForPanel(aiData?.questions || [])
     selectedRelatedQuestionKeys.value = []
@@ -763,18 +899,25 @@ async function loadRelatedQuestions() {
     return true
   } catch (error) {
     console.error('获取相关题目失败:', error)
-    relatedSessionId.value = null
-    relatedQuestions.value = []
-    selectedRelatedQuestionKeys.value = []
+    if (generatedQuestionsRequestToken.value === requestToken) {
+      relatedSessionId.value = null
+      relatedQuestions.value = []
+      selectedRelatedQuestionKeys.value = []
+      if (error?.message?.includes?.('timeout')) {
+        ElMessage.error('生成超时，请重试或减少生成数量')
+      }
+    }
     return false
   } finally {
-    relatedQuestionsLoading.value = false
-    generatingMessage.value = ''
+    if (generatedQuestionsRequestToken.value === requestToken) {
+      relatedQuestionsLoading.value = false
+      generatingMessage.value = ''
+    }
   }
 }
 
 async function generateReinforcementQuestions() {
-  const loaded = await loadRelatedQuestions()
+  const loaded = await loadGeneratedRelatedQuestions()
   if (!loaded) {
     ElMessage.error('生成强化题失败，请稍后重试')
     return
@@ -787,7 +930,8 @@ async function generateReinforcementQuestions() {
 }
 
 function mapSimilarQuestionsForPanel(source) {
-  return (source || []).map((item, index) => ({
+  const sourceList = Array.isArray(source) ? source : []
+  return sourceList.map((item, index) => ({
     uiKey: item.id ? `saved-${item.id}` : `generated-${index + 1}-${String(item.stem || '').slice(0, 20)}`,
     id: item.id,
     reinforcementQuestionId: item.id && String(item.id).startsWith('temp-') ? null : item.id,
@@ -1349,6 +1493,18 @@ function normalizeReinforcementQuestions(source) {
   margin-top: 8px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.answer-preview {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-lighter);
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* 操作按钮 */

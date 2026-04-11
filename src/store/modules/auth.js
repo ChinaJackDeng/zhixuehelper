@@ -73,15 +73,18 @@ const actions = {
 		try {
 			console.log('调用登录接口，数据:', loginData)
 
+			// 响应拦截器已经提取了 res.data，所以这里 response 已经是 {token, userInfo}
 			const response = await userLogin(loginData)
+			console.log('登录响应:', response)
 
-			if (response.data && response.data.data) {
-				const { token, userInfo } = response.data.data
+			// 检查响应是否有 token 和 userInfo
+			if (response && response.token && response.userInfo) {
+				const { token, userInfo } = response
 
 				commit('SET_TOKEN', token)
 				commit('SET_USER_INFO', userInfo)
 
-				return { success: true, data: response.data.data }
+				return { success: true, data: response }
 			}
 			throw new Error('登录响应格式错误')
 		} catch (error) {
@@ -97,8 +100,8 @@ const actions = {
 
 		try {
 			const response = await getUserInfo()
-			if (response.data && response.data.data) {
-				commit('SET_USER_INFO', response.data.data)
+			if (response) {
+				commit('SET_USER_INFO', response)
 			}
 		} catch (error) {
 			console.error('获取用户信息失败:', error)

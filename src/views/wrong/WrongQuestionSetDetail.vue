@@ -6,88 +6,129 @@
         <el-button circle @click="goBack" class="back-btn">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 class="page-title">{{ setInfo.name }}</h1>
+        <div class="title-section">
+          <h1 class="page-title">{{ setInfo.name }}</h1>
+          <div class="set-meta">
+            <el-tag :type="getSubjectType(setInfo.subject)" size="small" effect="plain" class="meta-tag">
+              {{ getSubjectName(setInfo.subject) }}
+            </el-tag>
+            <span class="create-time">创建于 {{ formatDate(setInfo.createTime) }}</span>
+          </div>
+        </div>
       </div>
       <div class="header-right">
-        <el-button type="primary" @click="startPractice">
-          <el-icon><TrendCharts /></el-icon>
-          开始练习
-        </el-button>
+        <div class="stat-summary">
+          <div class="stat-item">
+            <span class="stat-value">{{ questions.length }}</span>
+            <span class="stat-label">总错题</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="stat-value">{{ masteredCount }}</span>
+            <span class="stat-label">已掌握</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 信息栏 -->
-    <div class="info-bar">
-      <div class="info-left">
-        <el-tag :type="getSubjectType(setInfo.subject)" size="large">
-          {{ getSubjectName(setInfo.subject) }}
-        </el-tag>
-        <el-tag :type="getStatusType(setInfo.status)" size="large">
-          {{ getStatusName(setInfo.status) }}
-        </el-tag>
-        <span class="create-time">创建于 {{ formatDate(setInfo.createTime) }}</span>
-      </div>
-      <div class="info-right">
-        <span class="question-count">共 {{ questions.length }} 道错题</span>
-      </div>
-    </div>
-
-    <!-- 错题列表 -->
-    <div class="questions-grid">
-      <div 
-        v-for="question in questions" 
-        :key="question.id" 
-        class="question-card"
-        @click="viewDetail(question)"
-      >
-        <div class="question-header">
-          <span class="question-number">【{{ question.number }}】</span>
-          <el-tag :type="getStatusType(question.status)" size="small">
-            {{ getStatusName(question.status) }}
-          </el-tag>
+    <!-- 错题列表容器 -->
+    <div class="content-container">
+      <div class="list-header">
+        <div class="list-title">
+          <el-icon><List /></el-icon>
+          <span>题目列表</span>
         </div>
-
-        <h3 class="question-title">{{ question.title }}</h3>
-
-        <div class="question-content">
-          <div class="knowledge-points">
-            <el-icon><Collection /></el-icon>
-            <span>{{ question.knowledgePoints.slice(0, 2).join('、') }}</span>
-          </div>
-          <div class="error-info">
-            <el-icon><Warning /></el-icon>
-            <span>错误 {{ question.errorCount }} 次</span>
-          </div>
-        </div>
-
-        <div class="question-footer">
-          <div class="progress-section">
-            <span class="progress-label">掌握进度</span>
-            <el-progress 
-              :percentage="question.mastery" 
-              :color="getProgressColor(question.mastery)"
-              :show-text="false"
-              :stroke-width="4"
-            />
-            <span class="progress-value">{{ question.mastery }}%</span>
-          </div>
+        <div class="list-filter">
+          <el-radio-group v-model="filterStatus" size="small">
+            <el-radio-button label="all">全部</el-radio-button>
+            <el-radio-button label="pending">待强化</el-radio-button>
+            <el-radio-button label="mastered">已掌握</el-radio-button>
+          </el-radio-group>
         </div>
       </div>
 
-      <!-- 空状态 -->
-      <div v-if="questions.length === 0" class="empty-state">
-        <el-icon class="empty-icon"><DocumentDelete /></el-icon>
-        <p>该错题集暂无题目</p>
+      <div v-if="pageLoading" class="questions-grid">
+        <div v-for="idx in 8" :key="`skeleton-${idx}`" class="question-card skeleton-card">
+          <el-skeleton animated>
+            <template #template>
+              <div style="padding: 16px">
+                <el-skeleton-item variant="text" style="width: 30%; margin-bottom: 12px;" />
+                <el-skeleton-item variant="h3" style="width: 100%; margin-bottom: 10px;" />
+                <el-skeleton-item variant="text" style="width: 80%; margin-bottom: 20px;" />
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <el-skeleton-item variant="text" style="width: 40%;" />
+                  <el-skeleton-item variant="circle" style="width: 24px; height: 24px;" />
+                </div>
+              </div>
+            </template>
+          </el-skeleton>
+        </div>
+      </div>
+
+      <div v-else class="questions-grid">
+        <div 
+          v-for="question in filteredQuestions" 
+          :key="question.id" 
+          class="question-card"
+          :class="{ 'is-mastered': question.status === 'mastered' }"
+          @click="viewDetail(question)"
+        >
+          <div class="card-inner">
+            <div class="question-tag-row">
+              <span class="q-index">#{{ question.number }}</span>
+              <el-tag :type="getStatusType(question.status)" size="small" effect="light">
+                {{ getStatusName(question.status) }}
+              </el-tag>
+            </div>
+
+            <h3 class="question-title" :title="question.title">{{ question.title }}</h3>
+
+            <div class="question-meta">
+              <div class="meta-row">
+                <el-icon class="icon-kp"><Collection /></el-icon>
+                <div class="kp-list">
+                  <span v-for="(kp, i) in question.knowledgePoints.slice(0, 2)" :key="i" class="kp-tag">{{ kp }}</span>
+                </div>
+              </div>
+              <div class="meta-row">
+                <el-icon class="icon-err"><Warning /></el-icon>
+                <span>出现次数：<span class="err-count">{{ question.errorCount }}</span></span>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <div class="mastery-info">
+                <span class="label">掌握程度</span>
+                <el-progress 
+                  :percentage="question.mastery" 
+                  :color="getProgressColor(question.mastery)"
+                  :stroke-width="6"
+                  :show-text="false"
+                  class="custom-progress"
+                />
+              </div>
+              <div class="action-hint">
+                <span>查看详情</span>
+                <el-icon><ArrowRight /></el-icon>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 空状态 -->
+        <div v-if="filteredQuestions.length === 0" class="empty-state">
+          <el-empty :description="filterStatus === 'all' ? '该错题集暂无题目' : '暂无对应状态的题目'" />
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, TrendCharts, Warning, Collection, DocumentDelete } from '@element-plus/icons-vue'
+import { ArrowLeft, Warning, Collection, List, ArrowRight } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -101,16 +142,27 @@ const setInfo = ref({
 })
 
 const questions = ref([])
+const pageLoading = ref(true)
+const filterStatus = ref('all')
+
+const masteredCount = computed(() => {
+  return questions.value.filter(q => q.status === 'mastered').length
+})
+
+const filteredQuestions = computed(() => {
+  if (filterStatus.value === 'all') return questions.value
+  return questions.value.filter(q => q.status === filterStatus.value)
+})
 
 onMounted(() => {
-  const routeSetId = String(route.params.setId || '')
-  const storedSetRaw = sessionStorage.getItem('currentWrongSet')
-  if (!storedSetRaw) {
-    ElMessage.error('错题集数据不存在，请返回重试')
-    router.push('/wrong-questions')
-    return
-  }
   try {
+    const routeSetId = String(route.params.setId || '')
+    const storedSetRaw = sessionStorage.getItem('currentWrongSet')
+    if (!storedSetRaw) {
+      ElMessage.error('错题集数据不存在，请返回重试')
+      router.push('/wrong-questions')
+      return
+    }
     const storedSet = JSON.parse(storedSetRaw)
     const storedId = String(storedSet.id || '')
     if (storedId !== routeSetId) {
@@ -121,7 +173,7 @@ onMounted(() => {
     setInfo.value = {
       id: storedSet.id || routeSetId,
       name: storedSet.name || '错题集',
-      subject: storedSet.primaryTagName || '未打标签',
+      subject: storedSet.primaryTagName || '未分类',
       createTime: storedSet.createTime || new Date().toISOString(),
       status: storedSet.status || 'pending'
     }
@@ -130,8 +182,8 @@ onMounted(() => {
       mistakeId: q.mistakeId,
       number: index + 1,
       title: q.stem || `错题 ${index + 1}`,
-      subject: storedSet.primaryTagName || '未打标签',
-      knowledgePoints: Array.isArray(q.tags) && q.tags.length > 0 ? q.tags.map(t => t.name) : ['未打标签'],
+      subject: storedSet.primaryTagName || '未分类',
+      knowledgePoints: resolveQuestionKeyPoints(q),
       status: q.mastered ? 'mastered' : (storedSet.status || 'pending'),
       errorCount: 1,
       mastery: q.mastered ? 100 : (storedSet.status === 'practicing' ? 60 : 25),
@@ -141,6 +193,8 @@ onMounted(() => {
     console.error('读取错题集缓存失败:', error)
     ElMessage.error('错题集数据读取失败，请返回重试')
     router.push('/wrong-questions')
+  } finally {
+    pageLoading.value = false
   }
 })
 
@@ -190,6 +244,44 @@ const getProgressColor = (percentage) => {
   return '#f56c6c'
 }
 
+const normalizePointNames = (items) => {
+  if (!Array.isArray(items)) return []
+  return [...new Set(
+    items
+      .map(item => {
+        if (typeof item === 'string') return item.trim()
+        if (item && typeof item === 'object') return String(item.name || '').trim()
+        return ''
+      })
+      .filter(Boolean)
+  )]
+}
+
+const inferKeyPointsFromStem = (stem) => {
+  const text = String(stem || '')
+  if (!text) return []
+  const stopWords = new Set(['以下', '根据', '关于', '什么', '哪个', '下列', '正确', '错误', '请说明', '结合', '内容'])
+  const chunks = text
+    .split(/[，。；;：:\s、（）()【】“”"'`！？!?]/)
+    .map(item => item.trim())
+    .filter(Boolean)
+  const candidates = chunks
+    .filter(item => item.length >= 2 && item.length <= 14)
+    .filter(item => !stopWords.has(item))
+    .filter(item => /[\u4e00-\u9fa5A-Za-z]/.test(item))
+  return [...new Set(candidates)].slice(0, 3)
+}
+
+const resolveQuestionKeyPoints = (question) => {
+  const fromKnowledgePoints = normalizePointNames(question?.knowledge_points)
+  if (fromKnowledgePoints.length > 0) return fromKnowledgePoints.slice(0, 3)
+  const fromTags = normalizePointNames(question?.tags)
+  if (fromTags.length > 0) return fromTags.slice(0, 3)
+  const inferred = inferKeyPointsFromStem(question?.stem)
+  if (inferred.length > 0) return inferred
+  return ['考点待补充']
+}
+
 const formatDate = (dateStr) => {
   const date = new Date(dateStr)
   const now = new Date()
@@ -213,10 +305,6 @@ const viewDetail = (question) => {
   }
   router.push(`/wrong-questions/${question.mistakeId}`)
 }
-
-const startPractice = () => {
-  router.push('/reinforcement-practice')
-}
 </script>
 
 <style scoped>
@@ -235,198 +323,266 @@ const startPractice = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding: 16px 20px;
-  background: var(--el-bg-color);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  margin-bottom: 24px;
+  padding: 24px 32px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
 }
 
-.back-btn {
-  width: 40px;
-  height: 40px;
-  font-size: 20px;
+.title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .page-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
   color: var(--el-text-color-primary);
   margin: 0;
 }
 
-.header-right {
-  display: flex;
-  gap: 12px;
-}
-
-/* 信息栏 */
-.info-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  padding: 12px 20px;
-  background: var(--el-bg-color);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.info-left {
+.set-meta {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.meta-tag {
+  font-weight: 500;
 }
 
 .create-time {
-  font-size: 15px;
-  color: var(--el-text-color-secondary);
-  margin-left: 8px;
-}
-
-.info-right {
-  font-size: 15px;
-  color: var(--el-text-color-secondary);
-}
-
-.question-count {
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-/* 错题网格 */
-.questions-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  overflow-y: auto;
-  padding: 4px;
-}
-
-.question-card {
-  background: var(--el-bg-color);
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: flex;
-  flex-direction: column;
-}
-
-.question-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-.question-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.question-number {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--el-text-color-secondary);
-}
-
-.question-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-  margin-bottom: 10px;
-  line-height: 1.4;
-  display: -webkit-box;
-  display: box;
-  line-clamp: 2;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-height: 44px;
-}
-
-.question-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-  padding: 10px;
-  background: var(--el-fill-color-light);
-  border-radius: 6px;
-  flex: 1;
-}
-
-.knowledge-points,
-.error-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
 }
 
-.knowledge-points .el-icon,
-.error-info .el-icon {
-  color: #409eff;
-  font-size: 16px;
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 32px;
 }
 
-.question-footer {
+.stat-summary {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.stat-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--el-border-color-lighter);
+}
+
+/* 内容区域 */
+.content-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.list-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.list-title .el-icon {
+  color: var(--el-color-primary);
+}
+
+/* 错题网格 */
+.questions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  overflow-y: auto;
+  padding: 4px;
+  padding-bottom: 20px;
+}
+
+.question-card {
+  background: #fff;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+  position: relative;
+  overflow: hidden;
+}
+
+.question-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
+  border-color: var(--el-color-primary-light-8);
+}
+
+.question-card.is-mastered {
+  opacity: 0.85;
+}
+
+.card-inner {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.question-tag-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.q-index {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-placeholder);
+}
+
+.question-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 16px;
+  line-height: 1.5;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  height: 51px; /* 1.5 * 17 * 2 */
+}
+
+.question-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+}
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.meta-row .el-icon {
+  font-size: 15px;
+}
+
+.icon-kp { color: var(--el-color-primary); }
+.icon-err { color: var(--el-color-danger); }
+
+.kp-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.kp-tag {
+  background: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.err-count {
+  font-weight: 600;
+  color: var(--el-color-danger);
+}
+
+.card-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--el-border-color-extra-light);
+}
+
+.mastery-info {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.progress-section {
+.mastery-info .label {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.custom-progress {
+  width: 80%;
+}
+
+.action-hint {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--el-color-primary);
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: all 0.3s ease;
 }
 
-.progress-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  white-space: nowrap;
-}
-
-.progress-value {
-  font-size: 12px;
-  font-weight: 600;
-  color: #409eff;
-  min-width: 36px;
-  text-align: right;
+.question-card:hover .action-hint {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .empty-state {
   grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 80px 20px;
-  background: var(--el-bg-color);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.empty-icon {
-  font-size: 80px;
-  color: #dcdfe6;
-  margin-bottom: 16px;
-}
-
-.empty-state p {
-  font-size: 16px;
-  color: var(--el-text-color-secondary);
+  padding: 100px 0;
 }
 
 /* 响应式设计 */

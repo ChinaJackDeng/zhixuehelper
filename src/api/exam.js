@@ -144,6 +144,19 @@ export function getQuestionSetDetail(questionSetId) {
   })
 }
 
+export function exportQuestionSet(questionSetId, params = {}) {
+  return service({
+    url: `/exam/question-sets/${questionSetId}/export`,
+    method: 'get',
+    responseType: 'blob',
+    params: {
+      format: params.format || 'txt',
+      include_answers: params.include_answers !== false,
+      include_analysis: params.include_analysis !== false
+    }
+  })
+}
+
 /**
  * 保存练习进度
  * @param {Object} data - 请求数据
@@ -209,6 +222,14 @@ export function getQuestionDetail(questionId) {
   return service({
     url: `/exam/questions/${questionId}`,
     method: 'get'
+  })
+}
+
+export function evaluateEssayAnswer(questionId, data) {
+  return service({
+    url: `/exam/questions/${questionId}/evaluate-essay`,
+    method: 'post',
+    data
   })
 }
 
@@ -296,6 +317,70 @@ export function updateQuestion(questionId, data) {
     url: `/exam/questions/${questionId}`,
     method: 'put',
     data: data
+  })
+}
+
+export function getKnowledgePoints(params = {}) {
+  return service({
+    url: '/exam/knowledge-points',
+    method: 'get',
+    params: {
+      keyword: params.keyword || undefined
+    }
+  })
+}
+
+export function getKnowledgePointTree() {
+  return service({
+    url: '/exam/knowledge-points/tree',
+    method: 'get'
+  })
+}
+
+export function batchUpsertKnowledgePoints(data) {
+  return service({
+    url: '/exam/knowledge-points/batch-upsert',
+    method: 'post',
+    data
+  })
+}
+
+export function updateKnowledgePoint(knowledgePointId, data = {}) {
+  return service({
+    url: `/exam/knowledge-points/${knowledgePointId}`,
+    method: 'patch',
+    data
+  })
+}
+
+export function getKnowledgePointCandidates(data = {}) {
+  return service({
+    url: '/exam/knowledge-points/candidates',
+    method: 'post',
+    data: {
+      question_set_id: data.question_set_id || undefined,
+      limit: data.limit || 30
+    }
+  })
+}
+
+export function bindQuestionKnowledgePoints(questionId, knowledgePointIds = []) {
+  return service({
+    url: `/exam/questions/${questionId}/knowledge-points`,
+    method: 'post',
+    data: {
+      knowledge_point_ids: knowledgePointIds
+    }
+  })
+}
+
+export function getQuestionsByKnowledgePoint(knowledgePointId, params = {}) {
+  return service({
+    url: `/exam/questions/by-knowledge-point/${knowledgePointId}`,
+    method: 'get',
+    params: {
+      limit: params.limit || 100
+    }
   })
 }
 
@@ -523,7 +608,8 @@ export function startReinforcement(data) {
   return service({
     url: '/exam/reinforcement',
     method: 'post',
-    data: data
+    data: data,
+    timeout: 120000
   })
 }
 
@@ -542,10 +628,23 @@ export function getReinforcementSessionQuestions(sessionId, params = {}) {
     params
   })
 }
-
-export function addReinforcementQuestion(mistakeId, data) {
+export function getLatestReinforcementSession(mistakeId) {
+  return service({
+    url: `/exam/reinforcement/mistakes/${mistakeId}/latest-session`,
+    method: 'get'
+  })
+}
+ export function addReinforcementQuestion(mistakeId, data) {
   return service({
     url: `/exam/reinforcement/mistakes/${mistakeId}/questions`,
+    method: 'post',
+    data
+  })
+}
+
+export function createReinforcementAttempt(data) {
+  return service({
+    url: '/exam/reinforcement/attempts',
     method: 'post',
     data
   })
@@ -555,13 +654,5 @@ export function deleteReinforcementQuestion(reinforcementQuestionId) {
   return service({
     url: `/exam/reinforcement/questions/${reinforcementQuestionId}`,
     method: 'delete'
-  })
-}
-
-export function createReinforcementAttempt(data) {
-  return service({
-    url: '/exam/reinforcement/attempts',
-    method: 'post',
-    data
   })
 }

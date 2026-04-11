@@ -1,9 +1,6 @@
-<!-- KnowledgeBase.vue -->
 <template>
   <div class="knowledge-base-page">
-    <!-- 顶部操作栏 -->
     <div class="top-action-bar">
-      <!-- 搜索区域 -->
       <div class="search-section">
         <el-select v-model="searchType" placeholder="搜索类型" size="default" class="search-type-select">
           <el-option label="全部文件" value="all" />
@@ -27,7 +24,6 @@
         <el-button v-if="searchKeyword || selectedTags.length > 0" @click="resetSearchAndFilters">重置筛选</el-button>
       </div>
 
-      <!-- 操作按钮组 -->
       <div class="action-buttons">
         <el-upload
             class="upload-btn"
@@ -47,6 +43,13 @@
         >
           粘贴文本
         </el-button>
+        <el-button
+            type="info"
+            plain
+            @click="goToKnowledgeGraph"
+        >
+          知识图关系
+        </el-button>
       </div>
     </div>
     
@@ -57,7 +60,6 @@
       <el-tag v-if="selectedDoc" effect="plain">当前文档 {{ selectedDoc.title }}</el-tag>
     </div>
 
-    <!-- 搜索结果信息 -->
     <div v-if="searchResults.keyword || searchResults.type === 'tags'" class="search-results-info">
       <el-alert
           :title="`通过${getSearchTypeName(searchResults.type)}检索，检索到了 ${searchResults.total} 条数据`"
@@ -67,9 +69,7 @@
       />
     </div>
 
-    <!-- 标签筛选栏 -->
     <div class="tag-filter-section">
-      <!-- 智能标签 -->
       <div class="tag-category">
         <div class="category-header">
           <h4>智能标签</h4>
@@ -99,7 +99,6 @@
         </div>
       </div>
 
-      <!-- 我的标签 -->
       <div class="tag-category">
         <div class="category-header">
           <h4>我的标签</h4>
@@ -137,7 +136,6 @@
         </div>
       </div>
 
-      <!-- 已选标签和匹配模式 -->
       <div v-if="selectedTags.length > 0" class="selected-tags-section">
         <div class="selected-tags-header">
           <span>已选标签：</span>
@@ -166,9 +164,7 @@
       </div>
     </div>
 
-    <!-- 主要内容区：左右分栏 -->
     <div class="main-content-area">
-      <!-- 左栏：知识文档列表 (60%) -->
       <div class="knowledge-list-panel" :style="{ width: selectedDoc ? '60%' : '100%' }">
         <div class="panel-header">
           <h3>知识文档</h3>
@@ -180,7 +176,6 @@
           </div>
         </div>
 
-        <!-- 文档卡片网格 -->
         <div class="documents-grid">
           <KnowledgeCard
               v-for="doc in filteredDocuments"
@@ -192,7 +187,6 @@
               @tag-click="handleTagClick"
           />
 
-          <!-- 空状态 -->
           <el-empty
               v-if="filteredDocuments.length === 0"
               description="暂无文档"
@@ -208,7 +202,6 @@
           </el-empty>
         </div>
 
-        <!-- 分页器（仅默认文档列表使用；搜索结果不分页，避免覆盖搜索结果） -->
         <div class="pagination-container" v-if="!searchResults.keyword && totalDocsFromBackend > pageSize">
           <el-pagination
               v-model:current-page="currentPage"
@@ -222,7 +215,6 @@
         </div>
       </div>
 
-      <!-- 右栏：文档详情面板 (40%) -->
       <div class="detail-panel">
         <div v-if="!selectedDoc" class="empty-detail">
           <el-empty description="请选择一个文档查看详情">
@@ -235,12 +227,10 @@
         </div>
 
         <div v-else>
-          <!-- 文档头部信息区：标题、信息 -->
           <div class="doc-header-section">
             <div class="detail-head-actions">
               <el-button text @click="selectedDoc = null">收起详情</el-button>
             </div>
-            <!-- 文档标题 -->
             <div class="doc-title-container">
               <h3 class="doc-title">{{ selectedDoc.title }}</h3>
               <div class="doc-meta">
@@ -255,7 +245,6 @@
               </div>
             </div>
 
-            <!-- 文档信息区 -->
             <div class="doc-info-container">
               <div class="doc-info-inline">
                 <div class="info-item">
@@ -285,7 +274,6 @@
             </div>
           </div>
 
-          <!-- 文档标签区：显示在中间空行 -->
           <div class="doc-tags-section">
             <div class="tags-line">
               <el-tag
@@ -303,7 +291,6 @@
                 {{ tag.name }}
               </el-tag>
               
-              <!-- 新增标签按钮 -->
               <el-button
                   type="primary"
                   link
@@ -316,9 +303,7 @@
             </div>
           </div>
 
-          <!-- 推荐标签和关键词区 -->
           <div class="doc-metadata-section">
-            <!-- 自动推荐标签区 -->
             <div class="info-section" v-if="autoKeywords.length > 0">
               <div class="info-section-title">
                 <el-icon><Star /></el-icon>
@@ -337,7 +322,6 @@
               </div>
             </div>
 
-            <!-- 关键词展示区 -->
             <div class="info-section" v-if="selectedDoc.keywords && selectedDoc.keywords.length > 0">
               <div class="info-section-title">
                 <el-icon><Key /></el-icon>
@@ -357,7 +341,6 @@
             </div>
           </div>
 
-          <!-- 文档内容显示区 -->
           <div class="doc-content-section">
             <div class="section-title">
               <span>文档内容</span>
@@ -381,7 +364,6 @@
 
             <div class="content-display">
               <el-scrollbar>
-                <!-- Markdown 内容显示 -->
                 <div class="markdown-content" v-html="renderedMarkdown"></div>
               </el-scrollbar>
             </div>
@@ -390,7 +372,6 @@
       </div>
     </div>
 
-    <!-- 粘贴文本对话框 -->
     <el-dialog
         v-model="showPasteDialog"
         title="创建文本文档"
@@ -435,7 +416,6 @@
       </template>
     </el-dialog>
 
-    <!-- 新建标签对话框 -->
     <el-dialog
         v-model="showAddTagDialog"
         title="新建标签"
@@ -459,7 +439,6 @@
       </template>
     </el-dialog>
 
-    <!-- 为文档添加标签对话框 -->
     <el-dialog
         v-model="showAddTagToDocDialog"
         title="为文档添加标签"
@@ -523,7 +502,6 @@
       </template>
     </el-dialog>
 
-    <!-- 删除确认对话框 -->
     <el-dialog
         v-model="showDeleteConfirm"
         title="确认删除"
@@ -547,7 +525,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { Search, Calendar, Refresh, Star, Key, Document } from '@element-plus/icons-vue'
 import KnowledgeCard from '@/components/common/KnowledgeCard.vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   getDocumentList,
@@ -580,6 +558,7 @@ marked.setOptions({
 })
 
 const router = useRouter()
+const route = useRoute()
 const store = useStore()
 
 const searchType = ref('all')
@@ -1204,6 +1183,10 @@ const handleGenerateFromDoc = () => {
   }
 }
 
+const goToKnowledgeGraph = () => {
+  router.push('/knowledge-graph')
+}
+
 const getSearchTypeName = (type) => {
   const typeMap = {
     'all': '全部文件',
@@ -1335,16 +1318,66 @@ const clearSelectedTags = () => {
   }
 }
 
-onMounted(() => {
+const applyRouteContext = async () => {
+  const routeKeyword = typeof route.query.keyword === 'string' ? route.query.keyword.trim() : ''
+  const routeSearchType = typeof route.query.search_type === 'string' ? route.query.search_type : ''
+  const routeDocId = Number(route.query.docId)
+  const hasRouteKeyword = Boolean(routeKeyword)
+  const hasRouteDoc = Number.isFinite(routeDocId) && routeDocId > 0
+  if (!hasRouteKeyword && !hasRouteDoc) {
+    return { hasRouteKeyword: false, hasRouteDoc: false }
+  }
+  if (routeKeyword) {
+    searchKeyword.value = routeKeyword
+    searchType.value = ['all', 'keyword', 'semantic', 'hybrid'].includes(routeSearchType) ? routeSearchType : 'keyword'
+    await handleSearch()
+  }
+  if (Number.isFinite(routeDocId) && routeDocId > 0) {
+    try {
+      const response = await getDocumentDetail(routeDocId)
+      const detail = response.data || response
+      const inList = displayedDocuments.value.find(item => Number(item.id) === routeDocId)
+      const fallbackDoc = normalizeDocumentForCard({
+        id: routeDocId,
+        title: detail?.title || route.query.docTitle || `文档${routeDocId}`,
+        ...detail
+      })
+      const baseDoc = inList || fallbackDoc
+      selectedDoc.value = {
+        ...baseDoc,
+        content: detail?.content || '暂无内容',
+        tags: detail?.tags || [],
+        keywords: detail?.keywords || [],
+        fileUrl: detail?.fileUrl || baseDoc.fileUrl || ''
+      }
+      autoKeywords.value = detail?.keywords || []
+    } catch (error) {
+      ElMessage.error('根据链接加载文档失败')
+    }
+  }
+  return { hasRouteKeyword, hasRouteDoc }
+}
+
+onMounted(async () => {
+  const routeContext = await applyRouteContext()
+
+  loadTags().catch(() => {})
+
+  if (routeContext.hasRouteKeyword) {
+    return
+  }
+
   if (ENABLE_DEFAULT_DOCUMENT_LIST) {
-    loadDocuments()
+    if (routeContext.hasRouteDoc) {
+      loadDocuments().catch(() => {})
+    } else {
+      await loadDocuments()
+    }
   } else {
     displayedDocuments.value = []
     store.commit('knowledge/SET_DOCUMENTS', [])
     totalDocsFromBackend.value = 0
   }
-  // 加载标签列表
-  loadTags()
 })
 
 // 监听匹配模式变化

@@ -5,7 +5,8 @@
   "scripts": {
     "serve": "vue-cli-service serve --port 8080",
     "build": "vue-cli-service build",
-    "dev": "vue-cli-service serve --port 8080"
+    "dev": "vue-cli-service serve --port 8080",
+    "compat:check": "node scripts/compat-check.js"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

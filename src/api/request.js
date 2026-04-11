@@ -123,7 +123,15 @@ service.interceptors.response.use(
             return Promise.reject(error)
         }
 
-        if (error.message?.includes('timeout')) {
+        // 优先提取后端返回的详细错误信息 (FastAPI HTTPException detail)
+        const responseData = error.response?.data
+        if (responseData?.detail) {
+            errorMsg = responseData.detail
+            error.message = errorMsg // 同步更新 error.message，方便组件 catch 后展示
+        } else if (responseData?.message) {
+            errorMsg = responseData.message
+            error.message = errorMsg
+        } else if (error.message?.includes('timeout')) {
             errorMsg = '请求超时，请检查网络'
         } else if (error.message?.includes('Network Error')) {
             errorMsg = '网络连接失败'

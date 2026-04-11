@@ -1,16 +1,10 @@
-<!-- src/App.vue -->
 <template>
   <div id="app">
-    <!-- 顶部导航栏 -->
-    <Header v-if="!isAuthPage" />
-    
-    <!-- 页面内容区域 -->
-    <div class="page-content" :class="{ 'no-header': isAuthPage }">
+    <Header v-if="!hideGlobalChrome" />
+    <div class="page-content" :class="{ 'no-header': hideGlobalChrome }">
       <router-view />
     </div>
-    
-    <!-- 全局浮动按钮 -->
-    <FloatingButton v-if="!isAuthPage" />
+    <FloatingButton v-if="!hideGlobalChrome" />
   </div>
 </template>
 
@@ -22,9 +16,9 @@ import FloatingButton from '@/components/common/FloatingButton.vue'
 
 const route = useRoute()
 
-// 判断是否为登录/注册页面
-const isAuthPage = computed(() => {
+const hideGlobalChrome = computed(() => {
   const path = route.path
+  if (path.startsWith('/admin')) return true
   return path === '/login' || path === '/register' || path === '/forgot-password' || path === '/reset-password'
 })
 

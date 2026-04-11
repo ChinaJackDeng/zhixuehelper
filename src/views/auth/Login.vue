@@ -1,10 +1,8 @@
 <template>
   <div class="login-container">
-    <!-- 背景设计 -->
     <div class="background-pattern"></div>
 
     <div class="login-wrapper">
-      <!-- 左侧装饰区 -->
       <div class="login-decoration">
         <div class="decoration-content">
           <div class="logo-title-container">
@@ -33,7 +31,6 @@
         </div>
       </div>
 
-      <!-- 右侧登录表单 -->
       <div class="login-form">
         <div class="form-header">
           <h2>用户登录</h2>
@@ -172,11 +169,16 @@ const handleLogin = async () => {
 
     loading.value = true
 
-    const loginTable={identifier: loginForm.username,
-      password: loginForm.password}
-    console.log(loginTable)
+    const loginTable = {
+      identifier: loginForm.username,
+      password: loginForm.password,
+      remember_me: loginForm.rememberMe
+    }
+    console.log('开始登录，请求数据:', loginTable)
+
     // 调用 Vuex action
-    await store.dispatch('auth/login', loginTable)
+    const result = await store.dispatch('auth/login', loginTable)
+    console.log('登录结果:', result)
 
     // 处理记住我功能
     if (loginForm.rememberMe) {
@@ -193,15 +195,21 @@ const handleLogin = async () => {
 
     // 获取重定向路径
     const redirectPath = router.currentRoute.value.query.redirect || '/analytics'
+    console.log('准备跳转到:', redirectPath)
 
-    console.log('跳转到:', redirectPath)
     // 跳转到目标页面
     setTimeout(() => {
-      router.push(redirectPath)
+      console.log('执行页面跳转')
+      router.push(redirectPath).then(() => {
+        console.log('跳转完成')
+      }).catch((err) => {
+        console.error('跳转失败:', err)
+      })
     }, 1000)
 
   } catch (error) {
-    console.error('登录失败:', error)
+    console.error('登录流程异常:', error)
+    console.error('错误详情:', error)
 
     // 错误处理
     let errorMessage = '登录失败，请稍后重试'
@@ -209,6 +217,8 @@ const handleLogin = async () => {
     if (error.response) {
       const status = error.response.status
       const data = error.response.data
+
+      console.log('HTTP 错误:', status, data)
 
       switch (status) {
         case 401:

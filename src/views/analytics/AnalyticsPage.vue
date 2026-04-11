@@ -1,5 +1,5 @@
 <template>
-  <div class="learning-dashboard">
+  <div v-loading="loading" class="learning-dashboard">
     <div class="dashboard-header card-base">
       <div class="header-left">
         <h1 class="dashboard-title">学习分析看板</h1>
@@ -7,15 +7,15 @@
       </div>
       <div class="header-right">
         <el-radio-group v-model="currentWeek" size="default">
-          <el-radio-button label="current">本周</el-radio-button>
-          <el-radio-button label="last">上周</el-radio-button>
-          <el-radio-button label="custom">近30天</el-radio-button>
+          <el-radio-button :label="'current'">本周</el-radio-button>
+          <el-radio-button :label="'last'">上周</el-radio-button>
+          <el-radio-button :label="'custom'">近30天</el-radio-button>
         </el-radio-group>
         <el-select v-model="reportCycle" class="cycle-select" size="default">
           <el-option label="周报" value="weekly" />
           <el-option label="月报" value="monthly" />
         </el-select>
-        <el-button type="primary" @click="regenerateReport">生成报告</el-button>
+        <el-button type="primary" :loading="loading" @click="regenerateReport">生成报告</el-button>
       </div>
     </div>
 
@@ -106,7 +106,7 @@
                   <div class="weak-title">{{ item.name }} 正确率 {{ item.rate }}%</div>
                   <div class="weak-sub">建议专项练习 {{ item.suggest }} 题</div>
                 </div>
-                <el-button type="primary" link>去练习</el-button>
+                <el-button type="primary" link @click="goPracticeFromWeakness(item)">去练习</el-button>
               </div>
             </div>
           </el-card>
@@ -128,6 +128,16 @@
               <li v-for="line in section.items" :key="line">{{ line }}</li>
             </ul>
           </div>
+          <div v-if="reportList.length > 0" class="report-section">
+            <h4 class="report-section-title">历史报告</h4>
+            <ul class="report-list">
+              <li v-for="item in reportList" :key="item.id">
+                <el-button link type="primary" @click="selectReport(item.id)">
+                  {{ item.title }}
+                </el-button>
+              </li>
+            </ul>
+          </div>
           <div class="report-actions">
             <el-button text type="primary" @click="regenerateReport">重新生成</el-button>
             <el-button type="primary" plain @click="exportReport">导出数据</el-button>
@@ -142,8 +152,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
+import { analyticsApi } from '@/api/analytics'
 
+const router = useRouter()
 const currentWeek = ref('current')
 const trendMetric = ref('questions')
 const showCompare = ref(true)
@@ -151,6 +164,10 @@ const reportCycle = ref('weekly')
 const generatedAt = ref(new Date())
 const trendChartRef = ref(null)
 const radarChartRef = ref(null)
+const loading = ref(false)
+const personalizedSuggestions = ref([])
+const reportList = ref([])
+const activeReport = ref(null)
 
 const trendMetricOptions = [
   { label: '刷题量', value: 'questions' },
@@ -158,91 +175,20 @@ const trendMetricOptions = [
   { label: '正确率', value: 'accuracy' }
 ]
 
+const createDefaultPeriod = (label, days = []) => ({
+  label,
+  days,
+  kpi: { duration: 0, questions: 0, accuracy: 0, completed: 0 },
+  trend: { questions: [], duration: [], accuracy: [] },
+  radar: [],
+  wrong: [{ name: '暂无数据', percentage: 0 }],
+  weakness: [{ name: '暂无薄弱知识点', rate: 0, suggest: 0 }]
+})
+
 const dashboardData = reactive({
-  current: {
-    label: '本周',
-    days: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-    kpi: { duration: 12.8, questions: 164, accuracy: 79, completed: 26 },
-    trend: {
-      questions: [18, 20, 16, 24, 26, 30, 30],
-      duration: [1.3, 1.5, 1.2, 1.8, 1.9, 2.5, 2.6],
-      accuracy: [72, 74, 75, 78, 80, 81, 79]
-    },
-    radar: [
-      { name: '数学计算', score: 84 },
-      { name: '逻辑推理', score: 74 },
-      { name: '英语阅读', score: 88 },
-      { name: '编程基础', score: 67 },
-      { name: '数据结构', score: 56 }
-    ],
-    wrong: [
-      { name: '动态规划', percentage: 68 },
-      { name: '递归算法', percentage: 52 },
-      { name: '图论基础', percentage: 43 },
-      { name: '排序算法', percentage: 29 }
-    ],
-    weakness: [
-      { name: '动态规划', rate: 52, suggest: 18 },
-      { name: '数据结构', rate: 56, suggest: 14 },
-      { name: '编程基础', rate: 67, suggest: 10 }
-    ]
-  },
-  last: {
-    label: '上周',
-    days: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-    kpi: { duration: 10.9, questions: 137, accuracy: 74, completed: 21 },
-    trend: {
-      questions: [14, 16, 13, 18, 22, 26, 28],
-      duration: [1.0, 1.2, 1.1, 1.4, 1.6, 2.1, 2.5],
-      accuracy: [69, 70, 71, 72, 75, 76, 74]
-    },
-    radar: [
-      { name: '数学计算', score: 79 },
-      { name: '逻辑推理', score: 69 },
-      { name: '英语阅读', score: 83 },
-      { name: '编程基础', score: 62 },
-      { name: '数据结构', score: 51 }
-    ],
-    wrong: [
-      { name: '动态规划', percentage: 73 },
-      { name: '递归算法', percentage: 57 },
-      { name: '图论基础', percentage: 46 },
-      { name: '排序算法', percentage: 33 }
-    ],
-    weakness: [
-      { name: '动态规划', rate: 47, suggest: 20 },
-      { name: '数据结构', rate: 51, suggest: 16 },
-      { name: '编程基础', rate: 62, suggest: 12 }
-    ]
-  },
-  custom: {
-    label: '近30天',
-    days: ['第1周', '第2周', '第3周', '第4周'],
-    kpi: { duration: 48.6, questions: 618, accuracy: 76, completed: 82 },
-    trend: {
-      questions: [132, 148, 157, 181],
-      duration: [10.8, 11.5, 12.7, 13.6],
-      accuracy: [72, 74, 77, 79]
-    },
-    radar: [
-      { name: '数学计算', score: 82 },
-      { name: '逻辑推理', score: 72 },
-      { name: '英语阅读', score: 86 },
-      { name: '编程基础', score: 66 },
-      { name: '数据结构', score: 58 }
-    ],
-    wrong: [
-      { name: '动态规划', percentage: 64 },
-      { name: '递归算法', percentage: 51 },
-      { name: '图论基础', percentage: 40 },
-      { name: '排序算法', percentage: 27 }
-    ],
-    weakness: [
-      { name: '动态规划', rate: 54, suggest: 20 },
-      { name: '数据结构', rate: 58, suggest: 16 },
-      { name: '编程基础', rate: 66, suggest: 13 }
-    ]
-  }
+  current: createDefaultPeriod('本周', ['周一', '周二', '周三', '周四', '周五', '周六', '周日']),
+  last: createDefaultPeriod('上周', ['周一', '周二', '周三', '周四', '周五', '周六', '周日']),
+  custom: createDefaultPeriod('近30天', [])
 })
 
 const dataByKey = computed(() => dashboardData[currentWeek.value] || dashboardData.current)
@@ -252,14 +198,59 @@ const compareData = computed(() => {
   return dashboardData.last
 })
 
-const radarData = computed(() => dataByKey.value.radar)
-const wrongDistData = computed(() => dataByKey.value.wrong)
-const weaknessData = computed(() => dataByKey.value.weakness)
+const radarData = computed(() => dataByKey.value.radar || [])
+const wrongDistData = computed(() => dataByKey.value.wrong || [])
+const weaknessData = computed(() => dataByKey.value.weakness || [])
+
+const metricConfigMap = {
+  questions: { name: '刷题量', unit: '题', color: '#2563eb' },
+  duration: { name: '学习时长', unit: '小时', color: '#0ea5e9' },
+  accuracy: { name: '正确率', unit: '%', color: '#14b8a6' }
+}
+
+const questionTypeLabelMap = {
+  single: '单选题',
+  multi: '多选题',
+  multiple: '多选题',
+  judge: '判断题',
+  fill: '填空题',
+  essay: '简答题'
+}
+
+const formatMistakeTypeName = (rawName) => {
+  const key = String(rawName || '').trim().toLowerCase()
+  return questionTypeLabelMap[key] || String(rawName || '未知题型')
+}
 
 const formatTrend = (value) => (value >= 0 ? `+${value}%` : `${value}%`)
 const calcTrend = (currentValue, previousValue) => {
   if (!previousValue) return 0
   return Math.round(((currentValue - previousValue) / previousValue) * 100)
+}
+
+const normalizeFloat = (value, precision = 1) => {
+  const n = Number(value || 0)
+  const base = 10 ** precision
+  return Math.round(n * base) / base
+}
+
+const formatDateTime = (value) => {
+  const date = value ? new Date(value) : new Date()
+  if (Number.isNaN(date.getTime())) return '-'
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  const hour = `${date.getHours()}`.padStart(2, '0')
+  const minute = `${date.getMinutes()}`.padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${minute}`
+}
+
+const formatDateLabel = (value) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const month = `${date.getMonth() + 1}`
+  const day = `${date.getDate()}`
+  return `${month}/${day}`
 }
 
 const overviewStats = computed(() => {
@@ -268,7 +259,7 @@ const overviewStats = computed(() => {
   return [
     {
       title: '学习时长',
-      display: `${current.duration}h`,
+      display: `${current.duration}小时`,
       trend: calcTrend(current.duration, previous.duration),
       progress: Math.min(100, Math.round((current.duration / 16) * 100))
     },
@@ -282,7 +273,7 @@ const overviewStats = computed(() => {
       title: '平均正确率',
       display: `${current.accuracy}%`,
       trend: calcTrend(current.accuracy, previous.accuracy),
-      progress: current.accuracy
+      progress: Math.max(0, Math.min(100, current.accuracy))
     },
     {
       title: '完成知识点',
@@ -293,60 +284,47 @@ const overviewStats = computed(() => {
   ].map((item) => ({ ...item, trendLabel: formatTrend(item.trend) }))
 })
 
-const metricConfigMap = {
-  questions: { name: '刷题量', unit: '题', color: '#2563eb' },
-  duration: { name: '学习时长', unit: '小时', color: '#0ea5e9' },
-  accuracy: { name: '正确率', unit: '%', color: '#14b8a6' }
-}
-
-const getWeakestItem = (items) => items.slice().sort((a, b) => a.score - b.score)[0]
-const getStrongestItem = (items) => items.slice().sort((a, b) => b.score - a.score)[0]
-
 const reportTitle = computed(() => {
+  if (activeReport.value?.title) return activeReport.value.title
   const cycleLabel = reportCycle.value === 'weekly' ? '周度学习报告' : '月度学习报告'
   return `${dataByKey.value.label}${cycleLabel}`
 })
 
-const generatedAtText = computed(() => {
-  const value = generatedAt.value
-  const year = value.getFullYear()
-  const month = `${value.getMonth() + 1}`.padStart(2, '0')
-  const day = `${value.getDate()}`.padStart(2, '0')
-  const hour = `${value.getHours()}`.padStart(2, '0')
-  const minute = `${value.getMinutes()}`.padStart(2, '0')
-  return `${year}-${month}-${day} ${hour}:${minute}`
-})
+const generatedAtText = computed(() => formatDateTime(activeReport.value?.generated_at || generatedAt.value))
 
 const reportSections = computed(() => {
-  const kpi = dataByKey.value.kpi
-  const previous = compareData.value.kpi
-  const weakest = getWeakestItem(radarData.value)
-  const strongest = getStrongestItem(radarData.value)
-  const topWrong = wrongDistData.value[0]
-  const suggestionLines = weaknessData.value.map(
-    (item) => `${item.name} 建议增加 ${item.suggest} 题专项训练，目标正确率提升至 ${Math.min(95, item.rate + 12)}%`
-  )
+  const report = activeReport.value
+  const fallbackKpi = dataByKey.value?.kpi || { questions: 0, duration: 0, accuracy: 0, completed: 0 }
+  const previous = compareData.value?.kpi || { questions: 0, duration: 0, accuracy: 0, completed: 0 }
+  const reportStats = report?.stats_data || report?.content?.stats || {}
+  const kpi = {
+    questions: Number(reportStats.questions ?? fallbackKpi.questions ?? 0),
+    duration: Number(reportStats.duration ?? fallbackKpi.duration ?? 0),
+    accuracy: Number(reportStats.accuracy ?? fallbackKpi.accuracy ?? 0),
+    completed: Number(fallbackKpi.completed ?? 0)
+  }
+  const suggestions = Array.isArray(report?.suggestions) && report.suggestions.length > 0
+    ? report.suggestions
+    : personalizedSuggestions.value.length > 0
+      ? personalizedSuggestions.value
+      : ['完成更多练习后即可获得个性化学习建议']
+  const summary = report?.summary || ''
+  const period = report?.content?.period
+  const periodLine = period?.start && period?.end ? `报告周期：${period.start} 至 ${period.end}` : `${dataByKey.value?.label || '本周'}学习情况`
 
   return [
     {
       title: '量化分析',
       items: [
-        `${dataByKey.value.label}累计刷题 ${kpi.questions} 题，较对比周期变化 ${formatTrend(calcTrend(kpi.questions, previous.questions))}`,
+        periodLine,
+        `累计刷题 ${kpi.questions} 题，较对比周期变化 ${formatTrend(calcTrend(kpi.questions, previous.questions))}`,
         `学习总时长 ${kpi.duration} 小时，平均正确率 ${kpi.accuracy}%`,
-        `完成知识点 ${kpi.completed} 个，学习覆盖面持续扩展`
+        summary || `完成知识点 ${kpi.completed} 个，学习覆盖面持续扩展`
       ]
     },
     {
-      title: '问题诊断',
-      items: [
-        `当前主要薄弱点为 ${weakest.name}（掌握度 ${weakest.score} 分）`,
-        `最稳定优势项为 ${strongest.name}（掌握度 ${strongest.score} 分）`,
-        `错题占比最高的是 ${topWrong.name}（${topWrong.percentage}%），建议优先复盘`
-      ]
-    },
-    {
-      title: '数据驱动建议',
-      items: suggestionLines
+      title: '个性化建议',
+      items: suggestions
     }
   ]
 })
@@ -354,14 +332,69 @@ const reportSections = computed(() => {
 let trendChartInstance = null
 let radarChartInstance = null
 
+const normalizeTrendPayload = (payload) => {
+  const labels = Array.isArray(payload?.labels) ? payload.labels.map(formatDateLabel) : []
+  const questions = Array.isArray(payload?.questions) ? payload.questions.map((v) => Number(v || 0)) : []
+  const duration = Array.isArray(payload?.duration) ? payload.duration.map((v) => normalizeFloat((Number(v || 0)) / 60, 1)) : []
+  const accuracy = Array.isArray(payload?.accuracy) ? payload.accuracy.map((v) => Number(v || 0)) : []
+  return { labels, questions, duration, accuracy }
+}
+
+const normalizeReportList = (list) => {
+  if (!Array.isArray(list)) return []
+  return list
+    .filter((item) => item && item.id)
+    .map((item) => ({
+      id: item.id,
+      title: item.title || '学习报告',
+      report_type: item.report_type || reportCycle.value,
+      summary: item.summary || '',
+      generated_at: item.generated_at,
+      content: item.content || {}
+    }))
+}
+
+const normalizeWeakPoints = (weakPoints = []) => {
+  if (!Array.isArray(weakPoints) || weakPoints.length === 0) {
+    return [{ name: '暂无薄弱知识点', rate: 0, suggest: 0 }]
+  }
+  return weakPoints.slice(0, 5).map((item) => {
+    const score = Number(item?.score ?? item?.mastery ?? 0)
+    return {
+      name: item?.name || '未知知识点',
+      rate: Math.max(0, Math.min(100, Math.round(score))),
+      suggest: Math.max(5, Math.round((80 - score) / 5))
+    }
+  })
+}
+
+const assignTrendByPeriod = (target, trendData) => {
+  dashboardData[target].days = trendData.labels
+  dashboardData[target].trend.questions = trendData.questions
+  dashboardData[target].trend.duration = trendData.duration
+  dashboardData[target].trend.accuracy = trendData.accuracy
+}
+
+const buildPeriodFromDailyRecords = (records = []) => {
+  const labels = records.map((item) => formatDateLabel(item.record_date))
+  return {
+    labels,
+    questions: records.map((item) => Number(item.questions_count || 0)),
+    duration: records.map((item) => normalizeFloat(Number(item.duration_minutes || 0) / 60, 1)),
+    accuracy: records.map((item) => Number(item.accuracy || 0))
+  }
+}
+
 const renderTrendChart = () => {
   if (!trendChartInstance) return
-  const currentSeries = dataByKey.value.trend[trendMetric.value]
-  const previousSeries = compareData.value.trend[trendMetric.value]
+  const currentTrend = dataByKey.value?.trend || {}
+  const compareTrend = compareData.value?.trend || {}
+  const currentSeries = currentTrend[trendMetric.value] || []
+  const previousSeries = compareTrend[trendMetric.value] || []
   const metric = metricConfigMap[trendMetric.value]
   const series = [
     {
-      name: `${dataByKey.value.label}${metric.name}`,
+      name: `${dataByKey.value?.label || '本周'}${metric.name}`,
       type: 'line',
       smooth: true,
       data: currentSeries,
@@ -380,7 +413,7 @@ const renderTrendChart = () => {
 
   if (showCompare.value) {
     series.push({
-      name: `${compareData.value.label}${metric.name}`,
+      name: `${compareData.value?.label || '上周'}${metric.name}`,
       type: 'line',
       smooth: true,
       data: previousSeries,
@@ -397,7 +430,7 @@ const renderTrendChart = () => {
     grid: { left: '4%', right: '4%', bottom: '4%', top: 36, containLabel: true },
     xAxis: {
       type: 'category',
-      data: dataByKey.value.days,
+      data: dataByKey.value?.days || [],
       axisLabel: { color: '#64748b', fontSize: 12 },
       axisLine: { lineStyle: { color: '#e2e8f0' } }
     },
@@ -415,9 +448,17 @@ const renderTrendChart = () => {
 
 const renderRadarChart = () => {
   if (!radarChartInstance) return
+  const radar = radarData.value || []
+  if (radar.length === 0) {
+    radarChartInstance.setOption({
+      title: { text: '暂无知识点数据', left: 'center', top: 'center', textStyle: { color: '#999', fontSize: 14 } },
+      series: []
+    })
+    return
+  }
   radarChartInstance.setOption({
     radar: {
-      indicator: radarData.value.map((item) => ({ name: item.name, max: 100 })),
+      indicator: radar.map((item) => ({ name: item.name, max: 100 })),
       radius: '62%',
       splitNumber: 5,
       axisName: { color: '#475569', fontSize: 12 },
@@ -429,8 +470,8 @@ const renderRadarChart = () => {
         type: 'radar',
         data: [
           {
-            value: radarData.value.map((item) => item.score),
-            name: `${dataByKey.value.label}掌握度`,
+            value: radar.map((item) => item.score),
+            name: `${dataByKey.value?.label || '本周'}掌握度`,
             areaStyle: { color: 'rgba(37, 99, 235, 0.2)' },
             lineStyle: { color: '#2563eb', width: 2 },
             itemStyle: { color: '#2563eb' }
@@ -441,13 +482,185 @@ const renderRadarChart = () => {
   })
 }
 
-const regenerateReport = () => {
-  generatedAt.value = new Date()
-  ElMessage.success('已基于最新学习数据生成报告')
+const loadReports = async () => {
+  try {
+    const list = await analyticsApi.getReports(reportCycle.value, 10)
+    reportList.value = normalizeReportList(list)
+    if (reportList.value.length === 0) {
+      activeReport.value = null
+      return
+    }
+    const firstId = activeReport.value?.id || reportList.value[0].id
+    await selectReport(firstId, false)
+  } catch (error) {
+    console.error('加载报告列表失败:', error)
+    reportList.value = []
+    activeReport.value = null
+  }
 }
 
-const exportReport = () => {
-  ElMessage.success('学习报告导出任务已创建')
+const selectReport = async (reportId, notify = true) => {
+  try {
+    const detail = await analyticsApi.getReportDetail(reportId)
+    activeReport.value = detail || null
+    if (activeReport.value?.generated_at) {
+      generatedAt.value = new Date(activeReport.value.generated_at)
+    } else {
+      generatedAt.value = new Date()
+    }
+    if (notify) ElMessage.success('已切换报告')
+  } catch (error) {
+    console.error('报告详情加载失败:', error)
+    ElMessage.error('报告加载失败，请重试')
+  }
+}
+
+const regenerateReport = async () => {
+  try {
+    loading.value = true
+    const response = await analyticsApi.generateReport(reportCycle.value)
+    const generated = Boolean(response?.success) || Boolean(response?.report_id)
+    if (!generated) {
+      throw new Error('报告生成失败')
+    }
+    ElMessage.success(response?.message || '报告生成成功')
+    if (response?.report_id) {
+      await selectReport(response.report_id, false)
+    }
+    await loadAnalyticsData(false)
+  } catch (error) {
+    console.error('生成报告失败:', error)
+    ElMessage.error(error?.message || '生成报告失败，请重试')
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadSuggestions = async () => {
+  try {
+    const suggestionsRes = await analyticsApi.getSuggestions()
+    const suggestions = Array.isArray(suggestionsRes?.suggestions) ? suggestionsRes.suggestions : []
+    personalizedSuggestions.value = suggestions.length > 0 ? suggestions : ['完成更多练习后即可获得个性化学习建议']
+    const normalizedWeakData = normalizeWeakPoints(suggestionsRes?.weak_points)
+    dashboardData.current.weakness = normalizedWeakData
+    dashboardData.last.weakness = normalizedWeakData
+    dashboardData.custom.weakness = normalizedWeakData
+  } catch (error) {
+    console.error('加载个性化建议失败:', error)
+    personalizedSuggestions.value = ['完成更多练习后即可获得个性化学习建议']
+    const fallbackWeakness = [{ name: '暂无薄弱知识点', rate: 0, suggest: 0 }]
+    dashboardData.current.weakness = fallbackWeakness
+    dashboardData.last.weakness = fallbackWeakness
+    dashboardData.custom.weakness = fallbackWeakness
+  }
+}
+
+const loadAnalyticsData = async (showMessage = true) => {
+  loading.value = true
+  try {
+    const [statsRes, weeklyTrendRes, monthlyTrendRes, records14Res, masteryRes, mistakeDistRes] = await Promise.all([
+      analyticsApi.getStats(),
+      analyticsApi.getTrendData('week'),
+      analyticsApi.getTrendData('month'),
+      analyticsApi.getDailyRecords(14),
+      analyticsApi.getKnowledgeMastery(),
+      analyticsApi.getMistakeDistribution()
+    ])
+
+    const stats = statsRes || {}
+    dashboardData.current.kpi = {
+      duration: normalizeFloat(Number(stats.duration_this_week || 0) / 60, 1),
+      questions: Number(stats.questions_this_week || 0),
+      accuracy: Math.round(Number(stats.accuracy_this_week || 0)),
+      completed: Number(stats.mastered_count || 0)
+    }
+    dashboardData.custom.kpi = {
+      duration: normalizeFloat(Number(stats.duration_this_month || 0) / 60, 1),
+      questions: Number(stats.questions_this_month || 0),
+      accuracy: Math.round(Number(stats.accuracy_this_month || 0)),
+      completed: Number(stats.mastered_count || 0)
+    }
+
+    const weekTrend = normalizeTrendPayload(weeklyTrendRes)
+    const monthTrend = normalizeTrendPayload(monthlyTrendRes)
+    assignTrendByPeriod('current', weekTrend)
+    assignTrendByPeriod('custom', monthTrend)
+
+    const records14 = Array.isArray(records14Res) ? records14Res : []
+    const lastSeven = records14.slice(0, Math.max(0, records14.length - 7))
+    const lastTrend = buildPeriodFromDailyRecords(lastSeven)
+    assignTrendByPeriod('last', lastTrend)
+    dashboardData.last.kpi = {
+      duration: normalizeFloat(lastTrend.duration.reduce((sum, item) => sum + item, 0), 1),
+      questions: lastTrend.questions.reduce((sum, item) => sum + item, 0),
+      accuracy: lastTrend.questions.length > 0 ? Math.round(lastTrend.accuracy.reduce((sum, item) => sum + item, 0) / lastTrend.accuracy.length) : 0,
+      completed: Number(stats.mastered_count || 0)
+    }
+
+    const mastery = Array.isArray(masteryRes) ? masteryRes : []
+    dashboardData.current.radar = mastery.slice(0, 5).map((item) => ({
+      name: item.name,
+      score: Math.round(Number(item.score || 0))
+    }))
+    dashboardData.last.radar = dashboardData.current.radar
+    dashboardData.custom.radar = dashboardData.current.radar
+
+    const fallbackWeakness = [{ name: '暂无薄弱知识点', rate: 0, suggest: 0 }]
+    dashboardData.current.weakness = fallbackWeakness
+    dashboardData.last.weakness = fallbackWeakness
+    dashboardData.custom.weakness = fallbackWeakness
+
+    const mistakeDist = mistakeDistRes && typeof mistakeDistRes === 'object'
+      ? mistakeDistRes
+      : stats.mistake_distribution || {}
+    const wrongList = Object.entries(mistakeDist)
+      .map(([name, info]) => ({ name: formatMistakeTypeName(name), percentage: Number(info?.percentage || 0) }))
+      .sort((a, b) => b.percentage - a.percentage)
+      .slice(0, 5)
+    const normalizedWrong = wrongList.length > 0 ? wrongList : [{ name: '暂无数据', percentage: 0 }]
+    dashboardData.current.wrong = normalizedWrong
+    dashboardData.last.wrong = normalizedWrong
+    dashboardData.custom.wrong = normalizedWrong
+
+    await nextTick()
+    renderTrendChart()
+    renderRadarChart()
+    if (showMessage) ElMessage.success('学习分析数据已更新')
+    await Promise.all([loadReports(), loadSuggestions()])
+  } catch (error) {
+    console.error('加载学习数据失败:', error)
+    ElMessage.error('加载学习分析失败，请检查后端服务')
+  } finally {
+    loading.value = false
+  }
+}
+
+const exportReport = async (format = 'csv') => {
+  try {
+    ElMessage.info('正在导出数据...')
+    const period = reportCycle.value === 'monthly' ? 'month' : 'week'
+    const response = await analyticsApi.exportData(format, period)
+    const blob = response instanceof Blob
+      ? response
+      : new Blob([response], { type: format === 'csv' ? 'text/csv' : 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `learning_data_${new Date().toISOString().split('T')[0]}.${format}`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+  } catch (error) {
+    console.error('导出失败:', error)
+    ElMessage.error('导出失败，请重试')
+  }
+}
+
+const goPracticeFromWeakness = (item) => {
+  const keyword = item?.name || ''
+  router.push({ path: '/practice', query: keyword ? { keyword } : {} })
 }
 
 const resizeCharts = () => {
@@ -467,8 +680,9 @@ const initCharts = () => {
 }
 
 onMounted(() => {
-  nextTick(() => {
+  nextTick(async () => {
     initCharts()
+    await loadAnalyticsData(false)
   })
   window.addEventListener('resize', resizeCharts)
 })
@@ -480,8 +694,9 @@ watch([currentWeek, trendMetric, showCompare], () => {
   })
 })
 
-watch([currentWeek, reportCycle], () => {
-  generatedAt.value = new Date()
+watch(reportCycle, async () => {
+  activeReport.value = null
+  await loadReports()
 })
 
 onBeforeUnmount(() => {

@@ -38,6 +38,7 @@
         <span class="legend-item"><i class="dot answered"></i>已答</span>
         <span class="legend-item"><i class="dot correct"></i>正确</span>
         <span class="legend-item"><i class="dot wrong"></i>错误</span>
+        <span class="legend-item"><i class="dot unanswered"></i>未作答</span>
         <span class="legend-item"><i class="dot marked"></i>标记</span>
       </div>
     </div>
@@ -53,6 +54,7 @@ const props = defineProps({
   currentIndex: { type: Number, default: 0 },
   userAnswers: { type: Object, default: () => ({}) },
   correctMap: { type: Object, default: () => ({}) },
+  statusMap: { type: Object, default: () => ({}) },
   mode: { type: String, default: 'practice' }
 })
 
@@ -63,11 +65,13 @@ const collapsed = ref(false)
 const getBtnClass = (idx) => {
   const q = props.questions[idx]
   const classes = []
+  const status = props.statusMap[q?.id]
 
   if (idx === props.currentIndex) classes.push('current')
   if (props.userAnswers[q?.id] !== undefined) classes.push('answered')
-  if (props.correctMap[q?.id] === true) classes.push('correct')
-  if (props.correctMap[q?.id] === false) classes.push('wrong')
+  if (status === 'correct') classes.push('correct')
+  if (status === 'wrong') classes.push('wrong')
+  if (status === 'unanswered') classes.push('unanswered')
   if (q?.marked) classes.push('marked')
 
   return classes
@@ -116,6 +120,7 @@ const emitNavigate = (idx) => {
 .nav-btn.answered:not(.current) { border-color:var(--color-success); color:var(--color-success) }
 .nav-btn.correct:not(.current) { background:#f0f9eb; border-color:var(--color-success) }
 .nav-btn.wrong:not(.current) { background:#fef0f0; border-color:var(--color-danger) }
+.nav-btn.unanswered:not(.current) { background:#ffffff; border-color:#dcdfe6; color:#909399 }
 .nav-btn.marked .mark-icon { position:absolute; top:-4px; right:-4px; font-size:12px; color:var(--color-warning) }
 
 .nav-legend { padding: var(--spacing-xs) var(--spacing-md); border-top:1px solid var(--border-color-light); font-size:14px; color:var(--text-secondary) }
@@ -125,6 +130,7 @@ const emitNavigate = (idx) => {
 .dot.answered { background: var(--color-success) }
 .dot.correct { background:#67c23a }
 .dot.wrong { background:var(--color-danger) }
+.dot.unanswered { background:#ffffff; border:1px solid #dcdfe6 }
 .dot.marked { background:var(--color-warning) }
 
 @media (max-width: 992px) {

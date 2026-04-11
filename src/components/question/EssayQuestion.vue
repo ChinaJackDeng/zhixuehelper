@@ -10,7 +10,6 @@
           :rows="5"
           placeholder="请输入您的答案..."
           class="essay-input"
-          @input="emit('update:modelValue', localValue)"
       />
     </template>
   </QuestionBase>

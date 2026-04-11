@@ -4,13 +4,15 @@
 import * as knowledge from './knowledge'
 import * as practice from './practice'
 import * as analytics from './analytics'
+import * as notification from './notification'
 
 
 // 🔹 导出 api 对象（按模块组织）
 export const api = {
     knowledge,
     practice,
-    analytics
+    analytics,
+    notification
 }
 
 // 🔹 默认导出 axios 实例（方便特殊需求直接使用）

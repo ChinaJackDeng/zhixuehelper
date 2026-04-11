@@ -27,7 +27,6 @@
     </div>
 
     <div class="practice-content">
-      <!-- 左侧：练习区域 -->
       <div class="practice-panel">
         <div v-if="!currentQuestion" class="empty-state">
           <el-empty description="暂无题目">
@@ -148,7 +147,6 @@
         </div>
       </div>
 
-      <!-- 右侧：学习路径和统计 -->
       <div v-if="currentQuestion" class="side-panel">
         <div class="learning-path-card">
           <div class="card-header">
@@ -251,7 +249,6 @@
       </div>
     </div>
 
-    <!-- 完成练习弹窗 -->
     <el-dialog v-model="showCompleteDialog" title="练习完成" width="500px" class="complete-dialog">
       <div class="complete-content">
         <div class="complete-icon">
@@ -277,7 +274,7 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="showCompleteDialog = false">返回错题本</el-button>
+        <el-button @click="goBack">返回错题本</el-button>
         <el-button type="primary" @click="restartPractice">重新练习</el-button>
       </template>
     </el-dialog>
@@ -289,6 +286,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createReinforcementAttempt, deleteReinforcementQuestion } from '@/api/exam'
+import { analyticsApi } from '@/api/analytics'
 import {
   ArrowLeft,
   ArrowRight,
@@ -313,6 +311,8 @@ const currentIndex = ref(0)
 const selectedAnswer = ref(null)
 const showResult = ref(false)
 const showCompleteDialog = ref(false)
+const practiceStartedAt = ref(Date.now())
+const analyticsSynced = ref(false)
 
 const questions = ref([
   {
@@ -618,7 +618,7 @@ const nextQuestion = () => {
     selectedAnswer.value = null
     showResult.value = false
   } else {
-    showCompleteDialog.value = true
+    completePractice()
   }
 }
 
@@ -629,7 +629,7 @@ const skipQuestion = () => {
     currentIndex.value++
     selectedAnswer.value = null
   } else {
-    showCompleteDialog.value = true
+    completePractice()
   }
 }
 
@@ -638,6 +638,44 @@ const jumpToQuestion = (index) => {
     currentIndex.value = index
     selectedAnswer.value = questions.value[index].userAnswer ?? null
     showResult.value = questions.value[index].userAnswer !== null
+  }
+}
+
+const syncAnalyticsAfterPractice = async () => {
+  if (analyticsSynced.value || questions.value.length === 0) return
+  const durationMinutes = Math.max(1, Math.round((Date.now() - practiceStartedAt.value) / 60000))
+  const questionsForAnalytics = questions.value.map((item, index) => {
+    const knowledge = Array.isArray(item.knowledgePoints) && item.knowledgePoints.length > 0
+      ? item.knowledgePoints[0]
+      : inferKnowledgePoint(item.title || item.content, index)
+    const hasAnswer = item.userAnswer !== null && item.userAnswer !== undefined
+    return {
+      id: item.reinforcementQuestionId || item.id,
+      knowledge,
+      category: item.type || 'single',
+      is_correct: hasAnswer ? isAnswerCorrect(item.userAnswer, resolveQuestionCorrectAnswer(item), item.type) : false
+    }
+  })
+
+  const correct = questionsForAnalytics.filter(item => item.is_correct).length
+  const wrong = questionsForAnalytics.length - correct
+
+  await analyticsApi.updateAfterExam({
+    correct_count: correct,
+    wrong_count: wrong,
+    duration_minutes: durationMinutes,
+    questions: questionsForAnalytics
+  })
+  analyticsSynced.value = true
+}
+
+const completePractice = async () => {
+  try {
+    await syncAnalyticsAfterPractice()
+  } catch (error) {
+    console.error('同步学习分析失败:', error)
+  } finally {
+    showCompleteDialog.value = true
   }
 }
 
@@ -691,6 +729,8 @@ const restartPractice = () => {
   selectedAnswer.value = null
   showResult.value = false
   showCompleteDialog.value = false
+  analyticsSynced.value = false
+  practiceStartedAt.value = Date.now()
 }
 
 function inferKnowledgePoint(title, index) {
@@ -700,6 +740,7 @@ function inferKnowledgePoint(title, index) {
 }
 
 onMounted(() => {
+  practiceStartedAt.value = Date.now()
   const storedQuestions = sessionStorage.getItem('reinforcementPracticeQuestions')
   if (!storedQuestions) return
   try {
