@@ -1,5 +1,10 @@
 <template>
-  <div class="knowledge-base-page">
+  <div
+    class="knowledge-base-page"
+    v-loading="isKnowledgeProcessing"
+    :element-loading-text="knowledgeLoadingText"
+    element-loading-background="rgba(255, 255, 255, 0.72)"
+  >
     <div class="top-action-bar">
       <div class="search-section">
         <el-select v-model="searchType" placeholder="搜索类型" size="default" class="search-type-select">
@@ -58,6 +63,22 @@
       <el-tag effect="plain" type="warning">标签 {{ totalTagCount }}</el-tag>
       <el-tag effect="plain" type="success">已选标签 {{ selectedTags.length }}</el-tag>
       <el-tag v-if="selectedDoc" effect="plain">当前文档 {{ selectedDoc.title }}</el-tag>
+    </div>
+
+    <div v-if="isKnowledgeProcessing" class="knowledge-processing-banner">
+      <div class="processing-banner-main">
+        <el-icon class="is-loading processing-icon"><Loading /></el-icon>
+        <div class="processing-copy">
+          <div class="processing-title">{{ knowledgeLoadingText }}</div>
+          <div class="processing-subtitle">{{ knowledgeLoadingHint }}</div>
+        </div>
+      </div>
+      <el-progress
+        :percentage="knowledgeLoadingPercent"
+        :show-text="false"
+        :stroke-width="8"
+        status="success"
+      />
     </div>
 
     <div v-if="searchResults.keyword || searchResults.type === 'tags'" class="search-results-info">
@@ -522,8 +543,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { Search, Calendar, Refresh, Star, Key, Document } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
+import { Search, Calendar, Refresh, Star, Key, Document, Loading } from '@element-plus/icons-vue'
 import KnowledgeCard from '@/components/common/KnowledgeCard.vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -586,6 +607,68 @@ const docToDelete = ref(null)
 // 加载状态
 const isUploading = ref(false)
 const isCreatingDocument = ref(false)
+const knowledgeLoadingText = ref('')
+const knowledgeLoadingHint = ref('')
+const knowledgeLoadingPercent = ref(0)
+let knowledgeLoadingTimer = null
+
+const isKnowledgeProcessing = computed(() => isUploading.value || isCreatingDocument.value)
+
+const knowledgeLoadingStages = [
+  {
+    text: '文件已上传，正在解析内容',
+    hint: '系统正在提取文本、切分知识块，请稍候',
+    percent: 28
+  },
+  {
+    text: 'AI 智能解析中',
+    hint: '正在理解内容主题并提取关键知识点',
+    percent: 56
+  },
+  {
+    text: 'AI 正在生成推荐标签',
+    hint: '正在整理语义标签并建立知识关联',
+    percent: 78
+  },
+  {
+    text: '正在写入知识库',
+    hint: '即将完成，请勿关闭页面或重复提交',
+    percent: 92
+  }
+]
+
+const startKnowledgeLoading = (mode = 'upload') => {
+  const firstText = mode === 'text' ? '文本已提交，正在智能解析' : '文件上传成功，正在智能解析'
+  const firstHint = mode === 'text'
+    ? '系统正在处理文本内容并生成知识结构'
+    : '系统正在提取文件内容并生成知识结构'
+
+  stopKnowledgeLoading()
+  knowledgeLoadingText.value = firstText
+  knowledgeLoadingHint.value = firstHint
+  knowledgeLoadingPercent.value = 12
+
+  let currentStage = 0
+  knowledgeLoadingTimer = window.setInterval(() => {
+    const stage = knowledgeLoadingStages[Math.min(currentStage, knowledgeLoadingStages.length - 1)]
+    knowledgeLoadingText.value = stage.text
+    knowledgeLoadingHint.value = stage.hint
+    knowledgeLoadingPercent.value = stage.percent
+    if (currentStage < knowledgeLoadingStages.length - 1) {
+      currentStage += 1
+    }
+  }, 2200)
+}
+
+const stopKnowledgeLoading = () => {
+  if (knowledgeLoadingTimer) {
+    window.clearInterval(knowledgeLoadingTimer)
+    knowledgeLoadingTimer = null
+  }
+  knowledgeLoadingText.value = ''
+  knowledgeLoadingHint.value = ''
+  knowledgeLoadingPercent.value = 0
+}
 
 const pasteFormRef = ref(null)
 const pasteForm = ref({
@@ -840,6 +923,7 @@ const resetSearchAndFilters = async () => {
 const handleFileUpload = async (options) => {
   try {
     isUploading.value = true
+    startKnowledgeLoading('upload')
     const response = await uploadDocument(options.file, options.file.name)
     
     if (response.data && response.data.message) {
@@ -855,6 +939,7 @@ const handleFileUpload = async (options) => {
     ElMessage.error('上传失败: ' + error.message)
   } finally {
     isUploading.value = false
+    stopKnowledgeLoading()
   }
 }
 
@@ -897,6 +982,7 @@ const createTextDocument = async () => {
     if (valid) {
       try {
         isCreatingDocument.value = true
+        startKnowledgeLoading('text')
         const response = await createTextDocApi({
           title: pasteForm.value.title,
           content: pasteForm.value.content
@@ -916,6 +1002,7 @@ const createTextDocument = async () => {
         ElMessage.error('创建失败: ' + error.message)
       } finally {
         isCreatingDocument.value = false
+        stopKnowledgeLoading()
       }
     }
   })
@@ -1386,6 +1473,10 @@ watch(tagMatchMode, async () => {
     await searchByTags()
   }
 })
+
+onBeforeUnmount(() => {
+  stopKnowledgeLoading()
+})
 </script>
 
 <style scoped>
@@ -1436,6 +1527,45 @@ watch(tagMatchMode, async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.knowledge-processing-banner {
+  margin: 12px 20px 0;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #eef5ff 0%, #f8fbff 100%);
+  border: 1px solid #d8e6ff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.12);
+}
+
+.processing-banner-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.processing-icon {
+  font-size: 22px;
+  color: #409eff;
+  flex-shrink: 0;
+}
+
+.processing-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.processing-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.processing-subtitle {
+  font-size: 13px;
+  color: #5f6b7a;
 }
 
 .tag-filter-section {

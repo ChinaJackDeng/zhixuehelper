@@ -65,6 +65,14 @@
               </div>
             </div>
           </template>
+          <el-alert
+            v-if="showLastWeekEmptyTip"
+            title="上周暂无学习记录，趋势与指标已按 0 展示"
+            type="info"
+            :closable="false"
+            show-icon
+            class="empty-week-alert"
+          />
           <div ref="trendChartRef" class="trend-chart"></div>
         </el-card>
 
@@ -119,6 +127,7 @@
             <div>
               <h3 class="report-title">{{ reportTitle }}</h3>
               <p class="report-meta">自动生成时间：{{ generatedAtText }}</p>
+              <p class="report-meta">自动报告：{{ autoReportMeta }}</p>
             </div>
           </div>
           <el-divider />
@@ -168,6 +177,10 @@ const loading = ref(false)
 const personalizedSuggestions = ref([])
 const reportList = ref([])
 const activeReport = ref(null)
+const autoReportSettings = ref({
+  auto_report_enabled: true,
+  report_schedule: 'weekly'
+})
 
 const trendMetricOptions = [
   { label: '刷题量', value: 'questions' },
@@ -201,6 +214,15 @@ const compareData = computed(() => {
 const radarData = computed(() => dataByKey.value.radar || [])
 const wrongDistData = computed(() => dataByKey.value.wrong || [])
 const weaknessData = computed(() => dataByKey.value.weakness || [])
+const showLastWeekEmptyTip = computed(() => {
+  if (currentWeek.value !== 'last') return false
+  const last = dashboardData.last
+  const trend = last?.trend || {}
+  const totalQuestions = (trend.questions || []).reduce((sum, item) => sum + Number(item || 0), 0)
+  const totalDuration = (trend.duration || []).reduce((sum, item) => sum + Number(item || 0), 0)
+  const totalAccuracy = (trend.accuracy || []).reduce((sum, item) => sum + Number(item || 0), 0)
+  return totalQuestions === 0 && totalDuration === 0 && totalAccuracy === 0
+})
 
 const metricConfigMap = {
   questions: { name: '刷题量', unit: '题', color: '#2563eb' },
@@ -234,9 +256,24 @@ const normalizeFloat = (value, precision = 1) => {
   return Math.round(n * base) / base
 }
 
+const parseDateInput = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const dayMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dayMatch) {
+    const year = Number(dayMatch[1])
+    const month = Number(dayMatch[2])
+    const day = Number(dayMatch[3])
+    return new Date(year, month - 1, day, 0, 0, 0, 0)
+  }
+  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 const formatDateTime = (value) => {
-  const date = value ? new Date(value) : new Date()
-  if (Number.isNaN(date.getTime())) return '-'
+  const date = value ? parseDateInput(value) : new Date()
+  if (!date || Number.isNaN(date.getTime())) return '-'
   const year = date.getFullYear()
   const month = `${date.getMonth() + 1}`.padStart(2, '0')
   const day = `${date.getDate()}`.padStart(2, '0')
@@ -246,8 +283,8 @@ const formatDateTime = (value) => {
 }
 
 const formatDateLabel = (value) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  const date = parseDateInput(value)
+  if (!date || Number.isNaN(date.getTime())) return value
   const month = `${date.getMonth() + 1}`
   const day = `${date.getDate()}`
   return `${month}/${day}`
@@ -291,6 +328,11 @@ const reportTitle = computed(() => {
 })
 
 const generatedAtText = computed(() => formatDateTime(activeReport.value?.generated_at || generatedAt.value))
+const autoReportMeta = computed(() => {
+  const enabled = Boolean(autoReportSettings.value?.auto_report_enabled)
+  const schedule = autoReportSettings.value?.report_schedule === 'monthly' ? '每月' : '每周'
+  return enabled ? `已开启（${schedule}自动生成）` : '已关闭（仅手动生成）'
+})
 
 const reportSections = computed(() => {
   const report = activeReport.value
@@ -311,22 +353,41 @@ const reportSections = computed(() => {
   const summary = report?.summary || ''
   const period = report?.content?.period
   const periodLine = period?.start && period?.end ? `报告周期：${period.start} 至 ${period.end}` : `${dataByKey.value?.label || '本周'}学习情况`
+  const structured = report?.content?.structured || {}
+  const quantAnalysis = Array.isArray(structured?.quant_analysis) ? structured.quant_analysis : []
+  const diagnosis = Array.isArray(structured?.diagnosis) ? structured.diagnosis : []
+  const actionPlan = Array.isArray(structured?.action_plan) ? structured.action_plan : []
+  const explainability = Array.isArray(structured?.explainability) ? structured.explainability : []
 
-  return [
-    {
-      title: '量化分析',
-      items: [
-        periodLine,
-        `累计刷题 ${kpi.questions} 题，较对比周期变化 ${formatTrend(calcTrend(kpi.questions, previous.questions))}`,
-        `学习总时长 ${kpi.duration} 小时，平均正确率 ${kpi.accuracy}%`,
-        summary || `完成知识点 ${kpi.completed} 个，学习覆盖面持续扩展`
-      ]
-    },
-    {
-      title: '个性化建议',
-      items: suggestions
-    }
-  ]
+  const sections = [{
+    title: '量化分析',
+    items: quantAnalysis.length > 0
+      ? [periodLine, ...quantAnalysis]
+      : [
+          periodLine,
+          `累计刷题 ${kpi.questions} 题，较对比周期变化 ${formatTrend(calcTrend(kpi.questions, previous.questions))}`,
+          `学习总时长 ${kpi.duration} 小时，平均正确率 ${kpi.accuracy}%`,
+          summary || `完成知识点 ${kpi.completed} 个，学习覆盖面持续扩展`
+        ]
+  }]
+
+  if (diagnosis.length > 0) {
+    sections.push({
+      title: '诊断结论',
+      items: diagnosis
+    })
+  }
+  sections.push({
+    title: '行动建议',
+    items: actionPlan.length > 0 ? actionPlan : suggestions
+  })
+  if (explainability.length > 0) {
+    sections.push({
+      title: '可解释依据',
+      items: explainability
+    })
+  }
+  return sections
 })
 
 let trendChartInstance = null
@@ -373,16 +434,6 @@ const assignTrendByPeriod = (target, trendData) => {
   dashboardData[target].trend.questions = trendData.questions
   dashboardData[target].trend.duration = trendData.duration
   dashboardData[target].trend.accuracy = trendData.accuracy
-}
-
-const buildPeriodFromDailyRecords = (records = []) => {
-  const labels = records.map((item) => formatDateLabel(item.record_date))
-  return {
-    labels,
-    questions: records.map((item) => Number(item.questions_count || 0)),
-    duration: records.map((item) => normalizeFloat(Number(item.duration_minutes || 0) / 60, 1)),
-    accuracy: records.map((item) => Number(item.accuracy || 0))
-  }
 }
 
 const renderTrendChart = () => {
@@ -536,38 +587,26 @@ const regenerateReport = async () => {
   }
 }
 
-const loadSuggestions = async () => {
-  try {
-    const suggestionsRes = await analyticsApi.getSuggestions()
-    const suggestions = Array.isArray(suggestionsRes?.suggestions) ? suggestionsRes.suggestions : []
-    personalizedSuggestions.value = suggestions.length > 0 ? suggestions : ['完成更多练习后即可获得个性化学习建议']
-    const normalizedWeakData = normalizeWeakPoints(suggestionsRes?.weak_points)
-    dashboardData.current.weakness = normalizedWeakData
-    dashboardData.last.weakness = normalizedWeakData
-    dashboardData.custom.weakness = normalizedWeakData
-  } catch (error) {
-    console.error('加载个性化建议失败:', error)
-    personalizedSuggestions.value = ['完成更多练习后即可获得个性化学习建议']
-    const fallbackWeakness = [{ name: '暂无薄弱知识点', rate: 0, suggest: 0 }]
-    dashboardData.current.weakness = fallbackWeakness
-    dashboardData.last.weakness = fallbackWeakness
-    dashboardData.custom.weakness = fallbackWeakness
-  }
-}
-
 const loadAnalyticsData = async (showMessage = true) => {
   loading.value = true
   try {
-    const [statsRes, weeklyTrendRes, monthlyTrendRes, records14Res, masteryRes, mistakeDistRes] = await Promise.all([
+    const [statsRes, weeklyTrendRes, lastWeekTrendRes, monthlyTrendRes, masteryRes, mistakeDistRes, settingsRes, reportsRes, suggestionsRes] = await Promise.all([
       analyticsApi.getStats(),
       analyticsApi.getTrendData('week'),
+      analyticsApi.getTrendData('last_week'),
       analyticsApi.getTrendData('month'),
-      analyticsApi.getDailyRecords(14),
       analyticsApi.getKnowledgeMastery(),
-      analyticsApi.getMistakeDistribution()
+      analyticsApi.getMistakeDistribution(),
+      analyticsApi.getSettings(),
+      analyticsApi.getReports(reportCycle.value, 10),
+      analyticsApi.getSuggestions()
     ])
 
     const stats = statsRes || {}
+    autoReportSettings.value = {
+      auto_report_enabled: Boolean(settingsRes?.auto_report_enabled),
+      report_schedule: settingsRes?.report_schedule || 'weekly'
+    }
     dashboardData.current.kpi = {
       duration: normalizeFloat(Number(stats.duration_this_week || 0) / 60, 1),
       questions: Number(stats.questions_this_week || 0),
@@ -582,18 +621,16 @@ const loadAnalyticsData = async (showMessage = true) => {
     }
 
     const weekTrend = normalizeTrendPayload(weeklyTrendRes)
+    const lastWeekTrend = normalizeTrendPayload(lastWeekTrendRes)
     const monthTrend = normalizeTrendPayload(monthlyTrendRes)
     assignTrendByPeriod('current', weekTrend)
+    assignTrendByPeriod('last', lastWeekTrend)
     assignTrendByPeriod('custom', monthTrend)
 
-    const records14 = Array.isArray(records14Res) ? records14Res : []
-    const lastSeven = records14.slice(0, Math.max(0, records14.length - 7))
-    const lastTrend = buildPeriodFromDailyRecords(lastSeven)
-    assignTrendByPeriod('last', lastTrend)
     dashboardData.last.kpi = {
-      duration: normalizeFloat(lastTrend.duration.reduce((sum, item) => sum + item, 0), 1),
-      questions: lastTrend.questions.reduce((sum, item) => sum + item, 0),
-      accuracy: lastTrend.questions.length > 0 ? Math.round(lastTrend.accuracy.reduce((sum, item) => sum + item, 0) / lastTrend.accuracy.length) : 0,
+      duration: normalizeFloat(lastWeekTrend.duration.reduce((sum, item) => sum + item, 0), 1),
+      questions: lastWeekTrend.questions.reduce((sum, item) => sum + item, 0),
+      accuracy: lastWeekTrend.questions.length > 0 ? Math.round(lastWeekTrend.accuracy.reduce((sum, item) => sum + item, 0) / lastWeekTrend.accuracy.length) : 0,
       completed: Number(stats.mastered_count || 0)
     }
 
@@ -626,7 +663,19 @@ const loadAnalyticsData = async (showMessage = true) => {
     renderTrendChart()
     renderRadarChart()
     if (showMessage) ElMessage.success('学习分析数据已更新')
-    await Promise.all([loadReports(), loadSuggestions()])
+    reportList.value = normalizeReportList(reportsRes)
+    if (reportList.value.length === 0) {
+      activeReport.value = null
+    } else {
+      const firstId = activeReport.value?.id || reportList.value[0].id
+      await selectReport(firstId, false)
+    }
+    const suggestions = Array.isArray(suggestionsRes?.suggestions) ? suggestionsRes.suggestions : []
+    personalizedSuggestions.value = suggestions.length > 0 ? suggestions : ['完成更多练习后即可获得个性化学习建议']
+    const normalizedWeakData = normalizeWeakPoints(suggestionsRes?.weak_points)
+    dashboardData.current.weakness = normalizedWeakData
+    dashboardData.last.weakness = normalizedWeakData
+    dashboardData.custom.weakness = normalizedWeakData
   } catch (error) {
     console.error('加载学习数据失败:', error)
     ElMessage.error('加载学习分析失败，请检查后端服务')
@@ -849,6 +898,10 @@ onBeforeUnmount(() => {
 .trend-chart {
   width: 100%;
   min-height: 320px;
+}
+
+.empty-week-alert {
+  margin-bottom: 10px;
 }
 
 .diagnosis-grid {

@@ -289,11 +289,58 @@ export function generatePaper(data) {
     data: {
       title: data.title,
       description: data.description,
-      tags: data.tags,
+      tags: data.tags || [],
       question_distribution: data.question_distribution,
       total_score: data.total_score,
       duration_minutes: data.duration_minutes,
-      document_ids: data.document_ids
+      document_ids: data.document_ids,
+      question_set_id: data.question_set_id,
+      type_scores: data.type_scores
+    }
+  })
+}
+
+export function getPaperList() {
+  return service({
+    url: '/exam/papers',
+    method: 'get'
+  })
+}
+
+export function getPaperQuestions(paperId) {
+  return service({
+    url: `/exam/papers/${paperId}/questions`,
+    method: 'get'
+  })
+}
+
+export function submitPaperExam(paperId, data) {
+  return service({
+    url: `/exam/papers/${paperId}/submit`,
+    method: 'post',
+    data: {
+      answers: data.answers || {},
+      time_used: data.time_used || 0
+    }
+  })
+}
+
+export function deletePaper(paperId) {
+  return service({
+    url: `/exam/papers/${paperId}`,
+    method: 'delete'
+  })
+}
+
+export function exportPaper(paperId, params = {}) {
+  return service({
+    url: `/exam/papers/${paperId}/export`,
+    method: 'get',
+    responseType: 'blob',
+    params: {
+      format: params.format || 'txt',
+      include_answers: params.include_answers !== false,
+      include_analysis: params.include_analysis !== false
     }
   })
 }

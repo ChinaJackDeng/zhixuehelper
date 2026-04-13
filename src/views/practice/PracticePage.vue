@@ -9,6 +9,8 @@
         <el-button-group class="action-group">
           <el-button type="danger" :disabled="!selectedSetId" @click="deleteSet" :icon="Delete">删除</el-button>
           <el-button type="primary" :disabled="!selectedSetId" @click="openExportDialog" :icon="Download">导出</el-button>
+          <el-button type="success" :disabled="!selectedSetId" :loading="generatingSmartPaper" @click="openSmartPaperDialog" :icon="Finished">智能组卷</el-button>
+          <el-button type="warning" @click="goToExamPage" :icon="VideoPlay">去考试</el-button>
           <el-button type="info" @click="showExamHistory" :icon="Clock">历史</el-button>
         </el-button-group>
       </div>
@@ -17,17 +19,7 @@
 
       <div class="control-group">
         <span class="group-label">练习模式</span>
-        <el-radio-group v-model="mode" @change="onModeChange" size="default">
-          <el-radio-button label="practice">练习</el-radio-button>
-          <el-radio-button label="exam">考试</el-radio-button>
-        </el-radio-group>
-      </div>
-
-      <div v-if="mode === 'exam'" class="control-group exam-options">
-        <div class="control-divider"></div>
-        <el-input-number v-model="customDuration" :min="0" :max="7200" label="时间(秒)" size="default" style="width: 140px" placeholder="默认时间" />
-        <el-checkbox v-model="randomOrder">随机排序</el-checkbox>
-        <el-button type="primary" @click="startExam" :icon="VideoPlay">开始考试</el-button>
+        <el-tag type="success">练习</el-tag>
       </div>
 
       <div class="progress-section" v-if="questions.length > 0">
@@ -62,7 +54,7 @@
             <el-icon><Collection /></el-icon>
             题集：<strong>{{ currentSet?.name || '未选择' }}</strong>
           </div>
-          <div v-if="mode === 'exam' && examStarted" class="exam-status">
+          <div v-if="isExamPage && examStarted" class="exam-status">
             <span class="countdown">
               <el-icon><Timer /></el-icon>
               倒计时：<strong>{{ formattedTime }}</strong>
@@ -490,12 +482,47 @@
         <el-button type="primary" :loading="exportingPaper" @click="exportCurrentSet">开始导出</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="smartPaperDialogVisible" title="智能组卷设置" width="560px" append-to-body>
+      <el-form label-position="top">
+        <el-form-item label="考试时长（分钟）">
+          <el-input-number v-model="smartPaperDuration" :min="10" :max="300" style="width: 180px" />
+        </el-form-item>
+        <el-table :data="smartPaperTypeRows" size="small" border>
+          <el-table-column prop="label" label="题型" />
+          <el-table-column prop="availableCount" label="可选题量" width="100" />
+          <el-table-column label="抽题数量" width="130">
+            <template #default="{ row }">
+              <el-input-number v-model="smartPaperTypeCounts[row.type]" :min="0" :max="row.availableCount" :step="1" style="width: 100px" />
+            </template>
+          </el-table-column>
+          <el-table-column label="单题分值" width="140">
+            <template #default="{ row }">
+              <el-input-number v-model="smartPaperTypeScores[row.type]" :min="0.5" :step="0.5" :precision="1" style="width: 110px" />
+            </template>
+          </el-table-column>
+          <el-table-column label="小计分值" width="110">
+            <template #default="{ row }">
+              {{ (Number(smartPaperTypeCounts[row.type] || 0) * Number(smartPaperTypeScores[row.type] || 0)).toFixed(1) }}
+            </template>
+          </el-table-column>
+        </el-table>
+        <div style="margin-top: 12px; text-align: right; font-weight: 600;">
+          试卷总分：{{ smartPaperTotalScore.toFixed(1) }}
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="smartPaperDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="generatingSmartPaper" @click="generatePaperBySet">开始组卷</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Collection, Timer, Check, DocumentChecked, Document,
   ArrowLeft, ArrowRight, Close, Finished,
@@ -519,10 +546,9 @@ import {
   clearExamState,
   deleteQuestionSet,
   exportQuestionSet,
+  generatePaper,
   getExamHistory,
-  startExamWithConfig,
   getQuestionSetQuestions,
-  checkExamModeSwitch,
   getQuestionDetail,
   evaluateEssayAnswer,
   addMistake,
@@ -536,6 +562,8 @@ import {
 } from '@/api/exam'
 import { analyticsApi } from '@/api/analytics'
 
+const route = useRoute()
+const router = useRouter()
 const sets = ref([])
 const loading = ref(false)
 const selectedSetId = ref(null)
@@ -543,6 +571,7 @@ const currentSet = computed(() => sets.value.find(s => s.id === selectedSetId.va
 const questions = ref([])
 
 const mode = ref('practice')
+const isExamPage = computed(() => route.name === 'ExamSession')
 const timePerQuestion = ref(60)
 const timer = ref(null)
 const timeLeft = ref(0)
@@ -583,6 +612,23 @@ const examHistoryVisible = ref(false)
 const examHistory = ref([])
 const exportDialogVisible = ref(false)
 const exportingPaper = ref(false)
+const generatingSmartPaper = ref(false)
+const smartPaperDialogVisible = ref(false)
+const smartPaperDuration = ref(60)
+const smartPaperTypeScores = reactive({
+  choice: 2,
+  multi: 3,
+  judge: 1,
+  fill: 3,
+  short_answer: 5
+})
+const smartPaperTypeCounts = reactive({
+  choice: 0,
+  multi: 0,
+  judge: 0,
+  fill: 0,
+  short_answer: 0
+})
 const exportForm = reactive({
   format: 'pdf',
   include_answers: true,
@@ -619,6 +665,48 @@ const editableKnowledgePointOptions = computed(() => {
 })
 const parentKnowledgePointOptions = computed(() => {
   return knowledgePointOptions.value.filter(item => item.id !== selectedKnowledgePointMetaId.value)
+})
+const smartPaperTypeStats = computed(() => {
+  const stats = {
+    choice: 0,
+    multi: 0,
+    judge: 0,
+    fill: 0,
+    short_answer: 0
+  }
+  for (const q of questions.value) {
+    const type = String(q?.type || '').toLowerCase()
+    if (type === 'single') stats.choice += 1
+    else if (type === 'multi') stats.multi += 1
+    else if (type === 'judge') stats.judge += 1
+    else if (type === 'fill') stats.fill += 1
+    else if (type === 'essay') stats.short_answer += 1
+  }
+  return stats
+})
+const smartPaperTypeRows = computed(() => {
+  const labels = {
+    choice: '单选题',
+    multi: '多选题',
+    judge: '判断题',
+    fill: '填空题',
+    short_answer: '简答题'
+  }
+  return Object.entries(smartPaperTypeStats.value)
+    .filter(([, count]) => Number(count) > 0)
+    .map(([type, count]) => ({
+      type,
+      label: labels[type] || type,
+      availableCount: Number(count),
+      selectedCount: Math.max(0, Number(smartPaperTypeCounts[type] || 0)),
+      score: Number(smartPaperTypeScores[type] || 0)
+    }))
+})
+const smartPaperTotalScore = computed(() => {
+  return smartPaperTypeRows.value.reduce(
+    (sum, row) => sum + row.selectedCount * Number(smartPaperTypeScores[row.type] || 0),
+    0
+  )
 })
 
 // 缓存相关变量
@@ -1037,7 +1125,13 @@ function handleVisibilityChange() {
 }
 
 onMounted(async () => {
+  applyPageMode()
   await loadQuestionSets()
+  const querySetId = Number(route.query?.set_id)
+  if (Number.isInteger(querySetId) && querySetId > 0) {
+    selectedSetId.value = querySetId
+    await loadQuestions()
+  }
   await loadMistakes()
   await loadKnowledgePointOptions()
   window.addEventListener('keydown', handleKeydown)
@@ -1050,6 +1144,10 @@ onUnmounted(() => {
   if (detailPrefetchTimer) clearTimeout(detailPrefetchTimer)
   window.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
+
+watch(() => route.name, () => {
+  applyPageMode()
 })
 
 async function loadQuestionSets() {
@@ -1205,42 +1303,13 @@ function onSelectSet() {
   loadQuestions()
 }
 
-async function onModeChange(newMode) {
-  if (!selectedSetId.value) {
-    mode.value = newMode
-    return
-  }
-  
-  try {
-    const response = await checkExamModeSwitch({
-      question_set_id: selectedSetId.value,
-      current_mode: mode.value,
-      target_mode: newMode
-    })
-    
-    const data = handleResponse(response)
-    if (data?.has_unfinished_exam && !data?.can_switch) {
-      ElMessageBox.confirm(
-        '当前有未完成的考试，切换模式将丢失考试进度。确定要切换吗？',
-        '提示',
-        {
-          confirmButtonText: '确定切换',
-          cancelButtonText: '取消',
-          type: 'warning'
-        }
-      ).then(() => {
-        mode.value = newMode
-        ElMessage.success('模式已切换')
-      }).catch(() => {
-        // 取消切换，保持原模式
-      })
-    } else {
-      mode.value = newMode
-    }
-  } catch (error) {
-    console.error('模式切换检查失败:', error)
-    mode.value = newMode
-  }
+function applyPageMode() {
+  mode.value = isExamPage.value ? 'exam' : 'practice'
+}
+
+function goToExamPage() {
+  const query = selectedSetId.value ? { set_id: String(selectedSetId.value) } : undefined
+  router.push({ name: 'PaperExam', query })
 }
 
 function normalizeQuestion(q) {
@@ -1494,6 +1563,82 @@ async function exportCurrentSet() {
   }
 }
 
+function openSmartPaperDialog() {
+  if (!selectedSetId.value) {
+    ElMessage.warning('请先选择题集')
+    return
+  }
+  if (!questions.value.length) {
+    ElMessage.warning('请先加载题集题目后再组卷')
+    return
+  }
+  if (smartPaperTypeRows.value.length === 0) {
+    ElMessage.warning('当前题集没有可用于组卷的题目')
+    return
+  }
+  smartPaperTypeRows.value.forEach(row => {
+    const availableCount = Number(row.availableCount || 0)
+    const currentCount = Number(smartPaperTypeCounts[row.type] || 0)
+    smartPaperTypeCounts[row.type] = currentCount > 0 ? Math.min(currentCount, availableCount) : availableCount
+  })
+  smartPaperDialogVisible.value = true
+}
+
+async function generatePaperBySet() {
+  if (!selectedSetId.value) {
+    ElMessage.warning('请先选择题集')
+    return
+  }
+  const selectedRows = smartPaperTypeRows.value.filter(row => Number(smartPaperTypeCounts[row.type] || 0) > 0)
+  if (selectedRows.length === 0) {
+    ElMessage.warning('请至少选择一种题型并设置抽题数量')
+    return
+  }
+  if (selectedRows.some(row => Number(smartPaperTypeScores[row.type] || 0) <= 0)) {
+    ElMessage.warning('请为每种题型设置大于 0 的分值')
+    return
+  }
+  try {
+    generatingSmartPaper.value = true
+    const selectedSet = sets.value.find(item => item.id === selectedSetId.value)
+    const title = `${selectedSet?.name || `题集${selectedSetId.value}`} - 智能组卷`
+    const typeScoresPayload = selectedRows.reduce((acc, row) => {
+      acc[row.type] = Number(smartPaperTypeScores[row.type] || 0)
+      return acc
+    }, {})
+    const questionDistribution = selectedRows.reduce((acc, row) => {
+      acc[row.type] = {
+        count: Number(smartPaperTypeCounts[row.type] || 0),
+        difficulty: 'mixed'
+      }
+      return acc
+    }, {})
+    const response = await generatePaper({
+      title,
+      description: `基于题集「${selectedSet?.name || selectedSetId.value}」自动组卷`,
+      question_set_id: selectedSetId.value,
+      total_score: Number(smartPaperTotalScore.value || 0),
+      duration_minutes: Number(smartPaperDuration.value || 60),
+      type_scores: typeScoresPayload,
+      question_distribution: questionDistribution
+    })
+    const data = handleResponse(response, response)
+    const paperId = data?.paper_id || data?.id
+    if (paperId) {
+      ElMessage.success(`组卷成功（试卷ID：${paperId}）`)
+    } else {
+      ElMessage.success('组卷成功')
+    }
+    smartPaperDialogVisible.value = false
+    window.dispatchEvent(new Event('notification-refresh'))
+  } catch (error) {
+    console.error('基于题集智能组卷失败:', error)
+    ElMessage.error(error?.response?.data?.detail || error?.message || '智能组卷失败')
+  } finally {
+    generatingSmartPaper.value = false
+  }
+}
+
 function componentFor(type) {
   return {
     single: SingleQuestion,
@@ -1532,7 +1677,7 @@ function scheduleDetailPrefetch(index) {
 
 async function ensureQuestionDetail(questionId) {
   const idx = questionIndexMap.value[questionId] ?? questionIndexMap.value[String(questionId)]
-  if (idx === -1) return
+  if (idx == null || idx === -1) return
   const q = questions.value[idx]
   const hasKnowledgePoints = Array.isArray(q.knowledge_points) && q.knowledge_points.length > 0
   const needDetail = q.answer == null || !q.explanation || !hasKnowledgePoints || !q.difficulty
@@ -1740,7 +1885,8 @@ async function finishPractice() {
     const submitResponse = await submitExamApi({
       question_set_id: selectedSetId.value,
       answers: allAnswers,
-      time_used: timeUsed
+      time_used: timeUsed,
+      is_practice: true
     })
     const submitData = handleResponse(submitResponse)
     if (submitData?.exam_id) {
@@ -1897,38 +2043,6 @@ async function removeFromMistakes(questionId) {
     addedMistakesSet.add(questionId)
     console.error('取消加入错题集失败:', error)
     ElMessage({ message: '取消加入失败', type: 'error' })
-  }
-}
-
-async function startExam() {
-  if (!questions.value.length || !selectedSetId.value) return
-  
-  try {
-    await clearPersistedExamState()
-    
-    const response = await startExamWithConfig({
-      question_set_id: selectedSetId.value,
-      custom_duration: customDuration.value > 0 ? customDuration.value : undefined,
-      random_order: randomOrder.value
-    })
-    
-    const data = handleResponse(response)
-    if (data) {
-      report.examId = data.exam_id
-      timeLeft.value = data.duration || (questions.value.length * (timePerQuestion.value || 60))
-    } else {
-      timeLeft.value = questions.value.length * (timePerQuestion.value || 60)
-    }
-    
-    resetAnswerState()
-    resetPracticeViewState()
-    antiCheatLeaveCount.value = 0
-    examStarted.value = true
-    startTimer()
-    ElMessage.success('考试开始')
-  } catch (error) {
-    console.error('开始考试失败:', error)
-    ElMessage.error('开始考试失败')
   }
 }
 

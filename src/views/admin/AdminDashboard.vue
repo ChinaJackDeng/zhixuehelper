@@ -26,6 +26,34 @@
         </el-card>
       </el-col>
     </el-row>
+    <el-row :gutter="16" class="quality-row">
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card shadow="hover">
+          <div class="kpi-label">考试样本数</div>
+          <div class="kpi-value">{{ quality.total_exams }}</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card shadow="hover">
+          <div class="kpi-label">平均正确率</div>
+          <div class="kpi-value">{{ quality.avg_correct_rate_percent }}%</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card shadow="hover">
+          <div class="kpi-label">平均得分率</div>
+          <div class="kpi-value">{{ quality.avg_score_rate_percent }}%</div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card shadow="hover">
+          <div class="kpi-label">准确率98%目标</div>
+          <div class="kpi-value" :class="quality.accuracy_target_met ? 'kpi-pass' : 'kpi-fail'">
+            {{ quality.accuracy_target_met ? '达标' : '未达标' }}
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <el-card class="table-card">
       <template #header>
@@ -52,7 +80,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getPerformanceSummary, resetPerformanceSummary } from '@/api/admin'
+import { getPerformanceSummary, getQualitySummary, resetPerformanceSummary } from '@/api/admin'
 
 const loading = ref(false)
 const summary = reactive({
@@ -61,17 +89,31 @@ const summary = reactive({
   sla_2s_rate: 0,
   sla_3s_rate: 0
 })
+const quality = reactive({
+  total_exams: 0,
+  avg_correct_rate_percent: 0,
+  avg_score_rate_percent: 0,
+  accuracy_target_met: false
+})
 const topRoutes = ref([])
 
 const loadData = async () => {
   try {
     loading.value = true
-    const data = await getPerformanceSummary()
+    const [data, qualityData] = await Promise.all([
+      getPerformanceSummary(),
+      getQualitySummary(7)
+    ])
     const overall = data?.overall || {}
+    const examQuality = qualityData?.exam_quality || {}
     summary.total_requests = overall.total_requests || 0
     summary.p95_ms = overall.p95_ms || 0
     summary.sla_2s_rate = overall.sla_2s_rate || 0
     summary.sla_3s_rate = overall.sla_3s_rate || 0
+    quality.total_exams = examQuality.total_exams || 0
+    quality.avg_correct_rate_percent = examQuality.avg_correct_rate_percent || 0
+    quality.avg_score_rate_percent = examQuality.avg_score_rate_percent || 0
+    quality.accuracy_target_met = Boolean(examQuality.accuracy_target_met)
     topRoutes.value = Array.isArray(data?.top_slow_routes) ? data.top_slow_routes : []
   } finally {
     loading.value = false
@@ -91,6 +133,9 @@ onMounted(loadData)
 .table-card {
   margin-top: 16px;
 }
+.quality-row {
+  margin-top: 16px;
+}
 
 .kpi-label {
   color: #64748b;
@@ -102,6 +147,12 @@ onMounted(loadData)
   font-size: 29px;
   font-weight: 700;
   color: #0f172a;
+}
+.kpi-pass {
+  color: #16a34a;
+}
+.kpi-fail {
+  color: #dc2626;
 }
 
 .table-header {

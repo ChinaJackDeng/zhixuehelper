@@ -130,6 +130,11 @@ service.interceptors.response.use(
             error.message = errorMsg // 同步更新 error.message，方便组件 catch 后展示
         } else if (responseData?.message) {
             errorMsg = responseData.message
+            const detailFromData = responseData?.data?.error_detail
+            if (detailFromData && typeof detailFromData === 'string') {
+                // 对“数据库操作失败”这类统一文案补充后端细节，便于排障
+                errorMsg = `${responseData.message}（${detailFromData}）`
+            }
             error.message = errorMsg
         } else if (error.message?.includes('timeout')) {
             errorMsg = '请求超时，请检查网络'

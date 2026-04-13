@@ -4,6 +4,7 @@
     <div class="q-header">
       <el-tag size="small" :type="tagType">{{ typeLabel }}</el-tag>
       <el-tag size="small" effect="plain">{{ difficultyLabel }}</el-tag>
+      <el-tag v-if="scoreLabel" size="small" type="warning" effect="light">{{ scoreLabel }}</el-tag>
     </div>
 
     <!-- 题干 -->
@@ -96,6 +97,12 @@ const formattedAnswer = computed(() => {
   if (type === 'judge') return answer ? '正确' : '错误'
   if (Array.isArray(answer)) return answer.join(', ')
   return answer || '（未设置）'
+})
+
+const scoreLabel = computed(() => {
+  const raw = Number(props.question?.score)
+  if (!Number.isFinite(raw) || raw <= 0) return ''
+  return `${Number.isInteger(raw) ? raw : raw.toFixed(1)}分`
 })
 </script>
 

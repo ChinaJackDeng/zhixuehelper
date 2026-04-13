@@ -123,6 +123,14 @@ export const getPerformanceSummary = () => {
   })
 }
 
+export const getQualitySummary = (days = 7) => {
+  return request({
+    url: '/system/quality/summary',
+    method: 'get',
+    params: { days }
+  })
+}
+
 export const getAdminLogStats = () => {
   return request({
     url: '/admin/logs/stats',

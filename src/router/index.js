@@ -85,7 +85,16 @@ const routes = [
         name: 'Practice',
         component:()=>import('@/views/practice/PracticePage.vue'),
         meta: {
-            title:'练习/考试 - 智学助手',
+            title:'练习 - 智学助手',
+            requiresAuth: true
+        }
+    },
+    {
+        path:'/paper-exam',
+        name: 'PaperExam',
+        component:()=>import('@/views/exam/PaperExamPage.vue'),
+        meta: {
+            title:'试卷考试 - 智学助手',
             requiresAuth: true
         }
     },

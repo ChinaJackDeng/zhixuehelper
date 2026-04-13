@@ -188,6 +188,7 @@ const activeNav = computed(() => {
   if (route.path === '/knowledge-graph') return 'knowledge-graph'
   if (route.path.startsWith('/knowledge')) return 'knowledge'
   if (route.path.startsWith('/exam')) return 'exam'
+  if (route.path.startsWith('/paper-exam')) return 'practice'
   if (route.path.startsWith('/practice')) return 'practice'
   if (route.path.startsWith('/wrong-questions')) return 'wrong'
   if (route.path.startsWith('/reinforcement-practice')) return 'wrong'
@@ -316,6 +317,7 @@ const handleUserCommand = async (cmd) => {
 }
 
 onMounted(() => {
+  if (!store.getters['auth/token']) return
   loadNotifications(true)
   window.addEventListener('notification-refresh', handleNotificationRefresh)
   window.addEventListener('focus', handleWindowFocus)

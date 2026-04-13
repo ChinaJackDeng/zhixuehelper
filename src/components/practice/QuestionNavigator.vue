@@ -39,7 +39,6 @@
         <span class="legend-item"><i class="dot correct"></i>正确</span>
         <span class="legend-item"><i class="dot wrong"></i>错误</span>
         <span class="legend-item"><i class="dot unanswered"></i>未作答</span>
-        <span class="legend-item"><i class="dot marked"></i>标记</span>
       </div>
     </div>
   </aside>
